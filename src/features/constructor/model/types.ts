@@ -6,10 +6,18 @@
 /** Типы изделий — совпадают с полем `type` в API Pinhead. */
 export type GarmentType = 'tshirt' | 'hoodie' | 'longsleeve' | 'sweatshirt' | 'totebag' | 'cap';
 
-/** Стороны нанесения: перед и спина. Рукава — позже. */
-export type Side = 'front' | 'back';
-export const SIDES: Side[] = ['front', 'back'];
-export const SIDE_LABEL: Record<Side, string> = { front: 'Перед', back: 'Спина' };
+/**
+ * Стороны нанесения. Рукава есть только у изделий с мокапом и рисуются на виде спереди.
+ * Левый/правый — с точки зрения того, кто носит: на виде спереди левый рукав справа.
+ */
+export type Side = 'front' | 'back' | 'sleeve_left' | 'sleeve_right';
+export const SIDES: Side[] = ['front', 'back', 'sleeve_left', 'sleeve_right'];
+export const SIDE_LABEL: Record<Side, string> = {
+  front: 'Перед', back: 'Спина', sleeve_left: 'Левый рукав', sleeve_right: 'Правый рукав',
+};
+/** Короткие подписи для вкладок над холстом — четыре полных не влезают в ширину телефона. */
+export const SIDE_TAB: Record<Side, string> = { front: 'Перед', back: 'Спина', sleeve_left: 'Рукав Л', sleeve_right: 'Рукав П' };
+export const isSleeve = (s: Side) => s === 'sleeve_left' || s === 'sleeve_right';
 
 /** Товар в том виде, в каком его отдаёт GET {API}/api/products (подмножество IProduct из pnhd-studio). */
 export interface ApiProduct {

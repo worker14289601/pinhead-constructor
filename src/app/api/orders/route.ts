@@ -5,6 +5,10 @@ import { NextResponse } from 'next/server';
  * Прототип: если заданы ORDER_TELEGRAM_* — шлём сообщение и файлы в Telegram, иначе пишем в лог.
  * Финальный канал (Битрикс24 / Telegram / бэкенд сайта) настраивается через env.
  */
+const SIDE_NAME: Record<string, string> = {
+  front: 'перед', back: 'спина', sleeve_left: 'левый рукав', sleeve_right: 'правый рукав',
+};
+
 export async function POST(req: Request) {
   const form = await req.formData();
   const order = JSON.parse(String(form.get('order') ?? '{}'));
@@ -15,7 +19,7 @@ export async function POST(req: Request) {
   const text = [
     '🧩 Заявка из конструктора',
     `${order.garment?.name}, ${order.garment?.color}`,
-    `Нанесение: ${String(order.method).toUpperCase()} · ${order.price?.sides?.map((x: { side: string; format: string }) => `${x.side} ${x.format}`).join(', ')}`,
+    `Нанесение: ${String(order.method).toUpperCase()} · ${order.price?.sides?.map((x: { side: string; format: string }) => `${SIDE_NAME[x.side] ?? x.side} ${x.format}`).join(', ')}`,
     `Размеры: ${sizes} (всего ${order.price?.qty})`,
     `Сумма: ${order.price?.total} ₽`,
     `Клиент: ${c.name}, ${c.phone}${c.telegram ? `, ${c.telegram}` : ''}`,

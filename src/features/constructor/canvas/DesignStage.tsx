@@ -1,10 +1,12 @@
 'use client';
 import { useEffect, useImperativeHandle, useRef, useState, type RefObject } from 'react';
-import { Group, Image as KImage, Layer, Path, Rect, Stage, Transformer } from 'react-konva';
+import { Group, Image as KImage, Layer, Line, Path, Rect, Stage, Transformer } from 'react-konva';
 import type Konva from 'konva';
 import { FRAME, SHAPES } from '../config/garment-shapes';
 import { printAreaFor } from '../config/print-areas';
 import { selectGarment, selectVariant, useConstructor } from '../model/store';
+import { isSleeve } from '../model/types';
+import { alignLayer, snapToCenter, type AlignMode } from './align';
 import { DESIGN_NODE, LayerNode } from './LayerNode';
 import { SILHOUETTES, SILHOUETTE_VIEWBOX } from './silhouettes';
 import { isLight, useTintedMockup } from './tint';
@@ -14,9 +16,16 @@ export interface DesignStageHandle {
   exportPreview: () => string | null;
   /** PNG принта (без изделия, прозрачный фон) в 300 dpi по реальной ширине зоны. */
   exportPrint: () => string | null;
+  /** Выровнять слой в зоне печати (одним шагом истории). */
+  align: (id: string, mode: AlignMode) => void;
 }
 
 const DPI = 300;
+/** Максимальное приближение маленькой зоны (рукав): мокапы 800×920, дальше картинка мылится. */
+const MAX_ZOOM = 2.4;
+/** Порог прилипания к центру зоны, в пикселях экрана. */
+const SNAP_PX = 6;
+const ACCENT = '#ff4f00';
 
 /** apiRef — обычный проп, а не ref: next/dynamic не пробрасывает ref в ленивый компонент. */
 export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }) {
@@ -27,6 +36,7 @@ export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }
   const guideRef = useRef<Konva.Rect>(null);
   const trRef = useRef<Konva.Transformer>(null);
   const [size, setSize] = useState({ w: 400, h: 460 });
+  const [guides, setGuides] = useState({ v: false, h: false });
 
   const garment = useConstructor(selectGarment);
   const variant = useConstructor(selectVariant);
@@ -54,6 +64,26 @@ export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }
   const pa = garment ? printAreaFor(garment, side) : null;
   const area = pa ? { x: pa.x * size.w, y: pa.y * size.h, w: pa.width * size.w, h: pa.height * size.h } : null;
   const sideLayers = layers.filter((l) => l.side === side);
+
+  // Рукав — маленькая зона: приближаем холст к ней, не выходя за края кадра.
+  const view = { k: 1, x: 0, y: 0 };
+  if (isSleeve(side) && area) {
+    const k = Math.min(MAX_ZOOM, (0.5 * size.h) / area.h, (0.5 * size.w) / area.w);
+    const clamp = (v: number, min: number) => Math.min(0, Math.max(min, v));
+    view.k = k;
+    view.x = clamp(size.w / 2 - (area.x + area.w / 2) * k, size.w - size.w * k);
+    view.y = clamp(size.h / 2 - (area.y + area.h / 2) * k, size.h - size.h * k);
+  }
+
+  /** Прилипание к центру зоны при перетаскивании + направляющие. */
+  const onDrag = (node: Konva.Node | null) => {
+    const g = printRef.current;
+    if (!node || !g || !area) return setGuides((p) => (p.v || p.h ? { v: false, h: false } : p));
+    const rect = node.getClientRect({ relativeTo: g, skipShadow: true, skipStroke: true });
+    const snap = snapToCenter(rect, { w: area.w, h: area.h }, SNAP_PX / view.k);
+    if (snap.dx || snap.dy) node.position({ x: node.x() + snap.dx, y: node.y() + snap.dy });
+    setGuides((p) => (p.v === snap.v && p.h === snap.h ? p : { v: snap.v, h: snap.h }));
+  };
 
   // Рамка выделения живёт в отдельном слое — её не обрезает зона печати и не затеняют складки.
   useEffect(() => {
@@ -98,10 +128,26 @@ export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }
       const g = printRef.current;
       if (!g || !pa || !area) return null;
       const targetPx = (pa.widthCm / 2.54) * DPI;
+      // toDataURL берёт область в координатах экрана — с учётом приближения холста.
+      const at = g.getAbsolutePosition();
+      const w = area.w * view.k;
+      const h = area.h * view.k;
       // Файл для печати — без складок ткани.
       return withHidden([shadeRef.current, trRef.current], () =>
-        g.toDataURL({ x: area.x, y: area.y, width: area.w, height: area.h, pixelRatio: targetPx / area.w }),
+        g.toDataURL({ x: at.x, y: at.y, width: w, height: h, pixelRatio: targetPx / w }),
       );
+    },
+    align: (id, mode) => {
+      const g = printRef.current;
+      const node = g?.findOne(`#${id}`);
+      const layer = layers.find((l) => l.id === id);
+      if (!g || !node || !layer || !area) return;
+      const rect = node.getClientRect({ relativeTo: g, skipShadow: true, skipStroke: true });
+      if (!rect.width || !rect.height) return;
+      const r = alignLayer(mode, { x: node.x(), y: node.y() }, rect, { w: area.w, h: area.h });
+      const pos = { x: r.x / area.w, y: r.y / area.h };
+      if (r.scale === 1) return updateLayer(id, pos);
+      updateLayer(id, layer.kind === 'image' ? { ...pos, width: layer.width * r.scale } : { ...pos, fontSize: layer.fontSize * r.scale });
     },
   }));
 
@@ -112,7 +158,11 @@ export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }
 
   return (
     <div ref={wrapRef} style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center' }}>
-      <Stage ref={stageRef} width={size.w} height={size.h} onMouseDown={deselect} onTouchStart={deselect}>
+      <Stage
+        ref={stageRef} width={size.w} height={size.h}
+        scaleX={view.k} scaleY={view.k} x={view.x} y={view.y}
+        onMouseDown={deselect} onTouchStart={deselect}
+      >
         <Layer>
           {shape ? (
             mockup && <KImage name="bg" image={mockup.garment} width={size.w} height={size.h} />
@@ -135,7 +185,8 @@ export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }
               x={area.x} y={area.y} width={area.w} height={area.h}
               stroke={light ? 'rgba(0,0,0,.35)' : 'rgba(255,255,255,.6)'}
               strokeWidth={1}
-              dash={[6, 4]}
+              strokeScaleEnabled={false}
+              dash={[6 / view.k, 4 / view.k]}
             />
           )}
         </Layer>
@@ -149,6 +200,7 @@ export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }
                   area={{ w: area.w, h: area.h }}
                   onSelect={() => selectLayer(l.id)}
                   onChange={(p) => updateLayer(l.id, p)}
+                  onDrag={onDrag}
                 />
               ))}
               {mockup && sideLayers.length > 0 && (
@@ -167,6 +219,12 @@ export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }
           )}
         </Layer>
         <Layer>
+          {area && (guides.v || guides.h) && (
+            <Group x={area.x} y={area.y} listening={false}>
+              {guides.v && <Line points={[area.w / 2, 0, area.w / 2, area.h]} stroke={ACCENT} strokeWidth={1} strokeScaleEnabled={false} />}
+              {guides.h && <Line points={[0, area.h / 2, area.w, area.h / 2]} stroke={ACCENT} strokeWidth={1} strokeScaleEnabled={false} />}
+            </Group>
+          )}
           <Transformer
             ref={trRef}
             keepRatio
@@ -174,8 +232,8 @@ export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }
             rotationSnaps={[0, 90, 180, 270]}
             anchorSize={12}
             padding={6}
-            borderStroke="#ff4f00"
-            anchorStroke="#ff4f00"
+            borderStroke={ACCENT}
+            anchorStroke={ACCENT}
           />
         </Layer>
       </Stage>

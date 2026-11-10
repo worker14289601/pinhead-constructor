@@ -1,4 +1,4 @@
-import type { Garment, GarmentType, PrintArea, Side } from '../model/types';
+import { isSleeve, SIDES, type Garment, type GarmentType, type PrintArea, type Side } from '../model/types';
 import { SHAPES } from './garment-shapes';
 
 /**
@@ -6,12 +6,14 @@ import { SHAPES } from './garment-shapes';
  * ВРЕМЕННО: прикидка по мокапам. Реальные размеры зон (см) — от производства Pinhead
  * (уточняются у производства).
  */
-const TEE: Record<Side, PrintArea> = {
+type FlatSide = 'front' | 'back';
+
+const TEE: Record<FlatSide, PrintArea> = {
   front: { x: 0.3, y: 0.22, width: 0.4, height: 0.5, widthCm: 30 },
   back: { x: 0.3, y: 0.18, width: 0.4, height: 0.55, widthCm: 30 },
 };
 
-export const PRINT_AREAS: Record<GarmentType, Record<Side, PrintArea>> = {
+export const PRINT_AREAS: Record<GarmentType, Record<FlatSide, PrintArea>> = {
   tshirt: TEE,
   longsleeve: TEE,
   sweatshirt: TEE,
@@ -29,7 +31,13 @@ export const PRINT_AREAS: Record<GarmentType, Record<Side, PrintArea>> = {
   },
 };
 
+/** Стороны, доступные модели: рукав — только у изделий с мокапом (у шоппера и кепки его нет). */
+export function sidesFor(garment: Garment | null): Side[] {
+  return garment?.shapeId ? SIDES : SIDES.filter((s) => !isSleeve(s));
+}
+
 /** Зона печати модели: с мокапа, если он есть, иначе — общая по типу изделия. */
 export function printAreaFor(garment: Garment, side: Side): PrintArea {
-  return garment.shapeId ? SHAPES[garment.shapeId].areas[side] : PRINT_AREAS[garment.type][side];
+  if (garment.shapeId) return SHAPES[garment.shapeId].areas[side];
+  return PRINT_AREAS[garment.type][isSleeve(side) ? 'front' : (side as FlatSide)];
 }

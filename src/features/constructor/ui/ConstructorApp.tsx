@@ -3,14 +3,15 @@ import dynamic from 'next/dynamic';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchCatalog } from '../api/catalog';
 import { track } from '../analytics/events';
-import { printAreaFor } from '../config/print-areas';
+import { printAreaFor, sidesFor } from '../config/print-areas';
 import { METHOD_INFO } from '../config/pricing';
 import { isLight } from '../canvas/tint';
-import { calcPrice } from '../model/pricing';
+import { calcPrice, type SideBounds } from '../model/pricing';
 import { imageDpi, MIN_DPI, validateFile, ACCEPTED_TYPES } from '../model/quality';
-import { selectGarment, selectVariant, useConstructor } from '../model/store';
-import { SIDES, SIDE_LABEL, type PrintMethod } from '../model/types';
+import { canRedo, canUndo, selectGarment, selectVariant, useConstructor } from '../model/store';
+import { SIDE_LABEL, SIDE_TAB, type PrintMethod } from '../model/types';
 import type { DesignStageHandle } from '../canvas/DesignStage';
+import { LayersPanel } from './LayersPanel';
 import { OrderForm } from './OrderForm';
 import s from './constructor.module.css';
 
@@ -25,6 +26,15 @@ const TYPE_LABEL: Record<string, string> = {
 };
 const FONTS = ['Arial', 'Georgia', 'Impact', 'Courier New', 'Trebuchet MS'];
 
+/** Стрелка отмены; для повтора — зеркально. Символы ↶ ↷ в системных шрифтах выглядят по-разному. */
+const HistoryIcon = ({ redo }: { redo?: boolean }) => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+    strokeLinejoin="round" aria-hidden style={redo ? { transform: 'scaleX(-1)' } : undefined}>
+    <path d="M9 14 4 9l5-5" />
+    <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+  </svg>
+);
+
 type Tab = 'garment' | 'design' | 'order';
 const TABS: Array<[Tab, string]> = [['garment', 'Изделие'], ['design', 'Дизайн'], ['order', 'Размеры']];
 
@@ -38,6 +48,9 @@ export function ConstructorApp() {
   const [fileError, setFileError] = useState<string | null>(null);
   const [orderOpen, setOrderOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('garment');
+  const undoable = useConstructor(canUndo);
+  const redoable = useConstructor(canRedo);
+  const sides = sidesFor(garment);
 
   useEffect(() => {
     const ac = new AbortController();
@@ -47,13 +60,38 @@ export function ConstructorApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Cmd/Ctrl+Z — отмена, Cmd/Ctrl+Shift+Z и Ctrl+Y — повтор, Delete — удалить выбранный слой.
+  // Когда фокус в поле ввода, клавиши остаются полю (там своя отмена набора).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName))) return;
+      const st = useConstructor.getState();
+      const mod = e.metaKey || e.ctrlKey;
+      const key = e.key.toLowerCase();
+      if (mod && (key === 'z' || e.code === 'KeyZ')) {
+        e.preventDefault();
+        if (e.shiftKey) st.redo(); else st.undo();
+      } else if (mod && (key === 'y' || e.code === 'KeyY')) {
+        e.preventDefault();
+        st.redo();
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && st.selectedLayerId) {
+        e.preventDefault();
+        st.removeLayer(st.selectedLayerId);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   const hex = variant?.hex ?? '#ffffff';
-  const price = useMemo(
-    () =>
-      variant &&
-      calcPrice({ garmentPrice: variant.price, isWhite: isLight(hex), method: st.method, bounds: st.bounds, sizes: st.sizes }),
-    [variant, hex, st.method, st.bounds, st.sizes],
-  );
+  const sidesKey = sides.join(',');
+  const price = useMemo(() => {
+    if (!variant) return null;
+    // Печать на стороне, которой у модели нет (рукав у шоппера), в цену не идёт.
+    const bounds: SideBounds = Object.fromEntries(sidesKey.split(',').map((sd) => [sd, st.bounds[sd as keyof SideBounds]]));
+    return calcPrice({ garmentPrice: variant.price, isWhite: isLight(hex), method: st.method, bounds, sizes: st.sizes });
+  }, [variant, hex, st.method, st.bounds, st.sizes, sidesKey]);
 
   const onFile = (f?: File) => {
     if (!f || !garment) return;
@@ -84,9 +122,10 @@ export function ConstructorApp() {
     ? imageDpi(selected, printAreaFor(garment, selected.side).widthCm, selected.isVector)
     : null;
 
-  const canOrder = !!price?.qty && st.layers.length > 0;
+  const hasDesign = st.layers.some((l) => sides.includes(l.side));
+  const canOrder = !!price?.qty && hasDesign;
   const openOrder = () => {
-    if (!st.layers.length) return setTab('design');
+    if (!hasDesign) return setTab('design');
     if (!price?.qty) return setTab('order');
     setOrderOpen(true);
     track('order_form_open');
@@ -133,14 +172,20 @@ export function ConstructorApp() {
 
       {/* Холст */}
       <main className={s.center}>
+        {/* Отмена/повтор — в углу холста: строка вкладок занята четырьмя сторонами. */}
+        <div className={s.history}>
+          <button className={s.iconBtn} onClick={st.undo} disabled={!undoable} aria-label="Отменить" title="Отменить (Ctrl+Z)"><HistoryIcon /></button>
+          <button className={s.iconBtn} onClick={st.redo} disabled={!redoable} aria-label="Повторить" title="Повторить (Ctrl+Shift+Z)"><HistoryIcon redo /></button>
+        </div>
         <div className={s.sides}>
-          {SIDES.map((side) => (
+          {sides.map((side) => (
             <button
               key={side}
               className={side === st.side ? s.tabActive : s.tab}
+              title={SIDE_LABEL[side]}
               onClick={() => { st.setSide(side); track('side_switch', { side }); }}
             >
-              {SIDE_LABEL[side]}
+              {SIDE_TAB[side]}
               {st.layers.some((l) => l.side === side) && <i className={s.dot} />}
             </button>
           ))}
@@ -181,11 +226,14 @@ export function ConstructorApp() {
           <p className={s.muted}>PNG, JPG, WEBP или SVG до 15 МБ. Лучше — PNG с прозрачным фоном.</p>
           {fileError && <p className={s.err}>{fileError}</p>}
 
+          {/* Список — над свойствами: при выборе слоя строки не съезжают из-под пальца. */}
+          <LayersPanel hex={hex} />
+
           {selected?.kind === 'text' && (
             <div className={s.props}>
               <input
                 className={s.input} value={selected.text} aria-label="Текст"
-                onChange={(e) => st.updateLayer(selected.id, { text: e.target.value })}
+                onChange={(e) => st.updateLayer(selected.id, { text: e.target.value }, 'merge')}
               />
               <div className={s.row}>
                 <select
@@ -196,7 +244,7 @@ export function ConstructorApp() {
                 </select>
                 <input
                   type="color" className={s.color} value={selected.fill} aria-label="Цвет текста"
-                  onChange={(e) => st.updateLayer(selected.id, { fill: e.target.value })}
+                  onChange={(e) => st.updateLayer(selected.id, { fill: e.target.value }, 'merge')}
                 />
               </div>
             </div>
@@ -211,7 +259,11 @@ export function ConstructorApp() {
             </p>
           )}
           {selected && (
-            <button className={s.link} onClick={() => st.removeLayer(selected.id)}>Удалить элемент</button>
+            <div className={s.align} role="group" aria-label="Выравнивание">
+              <button className={s.btnSmall} onClick={() => stageRef.current?.align(selected.id, 'centerX')} title="По центру по горизонтали">⇔ Центр</button>
+              <button className={s.btnSmall} onClick={() => stageRef.current?.align(selected.id, 'centerY')} title="По центру по вертикали">⇕ Центр</button>
+              <button className={s.btnSmall} onClick={() => stageRef.current?.align(selected.id, 'fit')} title="Максимальный размер в зоне печати">⤢ Вписать</button>
+            </div>
           )}
 
           <h3 className={s.h}>Нанесение</h3>

@@ -11,13 +11,15 @@ interface Props {
   area: { w: number; h: number };
   onSelect: () => void;
   onChange: (patch: Partial<DesignLayer>) => void;
+  /** Узел во время перетаскивания (для прилипания к центру); null — перетаскивание закончилось. */
+  onDrag?: (node: Konva.Node | null) => void;
 }
 
 /** Имя узлов дизайна — по нему холст отличает их от служебных (тени, рамки). */
 export const DESIGN_NODE = 'design';
 
 /** Слой дизайна. Координаты хранятся в долях зоны печати, на экране — пиксели. */
-export function LayerNode({ layer, area, onSelect, onChange }: Props) {
+export function LayerNode({ layer, area, onSelect, onChange, onDrag }: Props) {
   const [img] = useImage(layer.kind === 'image' ? layer.src : '', 'anonymous');
   const textRef = useRef<Konva.Text>(null);
 
@@ -39,8 +41,11 @@ export function LayerNode({ layer, area, onSelect, onChange }: Props) {
     draggable: true,
     onMouseDown: onSelect,
     onTouchStart: onSelect,
-    onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) =>
-      onChange({ x: e.target.x() / area.w, y: e.target.y() / area.h }),
+    onDragMove: (e: Konva.KonvaEventObject<DragEvent>) => onDrag?.(e.target),
+    onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => {
+      onDrag?.(null);
+      onChange({ x: e.target.x() / area.w, y: e.target.y() / area.h });
+    },
     onTransformEnd: (e: Konva.KonvaEventObject<Event>) => {
       const n = e.target;
       const sx = n.scaleX();

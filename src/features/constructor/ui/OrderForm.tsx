@@ -3,7 +3,8 @@ import { useState, type RefObject } from 'react';
 import { track } from '../analytics/events';
 import type { PriceBreakdown } from '../model/pricing';
 import { useConstructor } from '../model/store';
-import { SIDES, type Garment, type GarmentVariant, type OrderContacts } from '../model/types';
+import { sidesFor } from '../config/print-areas';
+import { type Garment, type GarmentVariant, type OrderContacts } from '../model/types';
 import type { DesignStageHandle } from '../canvas/DesignStage';
 import s from './constructor.module.css';
 
@@ -29,7 +30,7 @@ export function OrderForm({ garment, variant, price, stage, onClose }: Props) {
       // Снимаем превью и файлы печати по каждой стороне с принтом.
       const form = new FormData();
       const original = side;
-      for (const sd of SIDES) {
+      for (const sd of sidesFor(garment)) {
         if (!layers.some((l) => l.side === sd)) continue;
         setSide(sd);
         // Даём React перерисовать холст на нужной стороне. Не rAF: он стоит во фоновых вкладках.
