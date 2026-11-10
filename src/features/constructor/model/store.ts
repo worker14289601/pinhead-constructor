@@ -4,7 +4,6 @@ import { sidesFor } from '../config/print-areas';
 import type {
   DesignLayer, Garment, ImageLayer, PrintMethod, Side, SizeQuantities, TextLayer,
 } from './types';
-import type { SideBounds } from './pricing';
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -37,7 +36,6 @@ interface ConstructorState {
   selectedLayerId: string | null;
   method: PrintMethod;
   sizes: SizeQuantities;
-  bounds: SideBounds;
   past: Snapshot[];
   future: Snapshot[];
 
@@ -59,7 +57,6 @@ interface ConstructorState {
   setSizeQty: (size: string, qty: number) => void;
   /** Прибавить/убавить от текущего значения — безопасно при быстрых нажатиях. */
   incSize: (size: string, delta: number) => void;
-  setBounds: (side: Side, b: { wCm: number; hCm: number } | null) => void;
 }
 
 let lastMerge: { key: string; at: number } | null = null;
@@ -70,13 +67,6 @@ const snapshot = (s: ConstructorState): Snapshot => ({ layers: s.layers, selecte
 const record = (s: ConstructorState) => {
   lastMerge = null;
   return { past: [...s.past, snapshot(s)].slice(-HISTORY_LIMIT), future: [] as Snapshot[] };
-};
-
-/** У стороны без слоёв нет и габарита — иначе цена считала бы печать, которой нет. */
-const pruneBounds = (layers: DesignLayer[], bounds: SideBounds): SideBounds => {
-  const next = { ...bounds };
-  for (const side of Object.keys(next) as Side[]) if (!layers.some((l) => l.side === side)) next[side] = null;
-  return next;
 };
 
 export const useConstructor = create<ConstructorState>((set, get) => {
@@ -96,7 +86,6 @@ export const useConstructor = create<ConstructorState>((set, get) => {
       layers: target.layers,
       selectedLayerId: target.layers.some((l) => l.id === target.selectedLayerId) ? target.selectedLayerId : null,
       side,
-      bounds: pruneBounds(target.layers, s.bounds),
       [from]: stack.slice(0, -1),
       [to]: [...s[to], current],
     });
@@ -111,7 +100,6 @@ export const useConstructor = create<ConstructorState>((set, get) => {
     selectedLayerId: null,
     method: 'dtf',
     sizes: {},
-    bounds: {},
     past: [],
     future: [],
 
@@ -125,7 +113,14 @@ export const useConstructor = create<ConstructorState>((set, get) => {
       const side = sidesFor(g).includes(get().side) ? get().side : 'front';
       set({ garmentId: id, variantId: g?.variants[0]?.productId ?? null, sizes: {}, side });
     },
-    selectVariant: (variantId) => set({ variantId }),
+    // У цветов одной модели набор размеров может отличаться: количество по размерам,
+    // которых у нового цвета нет, убираем — иначе оно незаметно осталось бы в сумме и заявке.
+    selectVariant: (variantId) =>
+      set((s) => {
+        const v = selectGarment(s)?.variants.find((x) => x.productId === variantId);
+        const sizes = v ? Object.fromEntries(Object.entries(s.sizes).filter(([k]) => v.sizes.includes(k))) : s.sizes;
+        return { variantId, sizes };
+      }),
     setSide: (side) => set({ side, selectedLayerId: null }),
 
     addImage: (img) => {
@@ -162,7 +157,7 @@ export const useConstructor = create<ConstructorState>((set, get) => {
     removeLayer: (id) =>
       set((s) => {
         const layers = s.layers.filter((l) => l.id !== id);
-        return { ...record(s), layers, selectedLayerId: null, bounds: pruneBounds(layers, s.bounds) };
+        return { ...record(s), layers, selectedLayerId: null };
       }),
     duplicateLayer: (id) =>
       set((s) => {
@@ -191,17 +186,9 @@ export const useConstructor = create<ConstructorState>((set, get) => {
 
     setMethod: (method) => set({ method }),
     setSizeQty: (size, qty) =>
-      set((s) => ({ sizes: { ...s.sizes, [size]: Math.max(0, Math.min(999, qty)) } })),
+      set((s) => ({ sizes: { ...s.sizes, [size]: Math.max(0, Math.min(999, Math.round(qty) || 0)) } })),
     incSize: (size, delta) =>
       set((s) => ({ sizes: { ...s.sizes, [size]: Math.max(0, Math.min(999, (s.sizes[size] ?? 0) + delta)) } })),
-    setBounds: (side, b) => {
-      // Холст зовёт это после каждого рендера — обновляем только при реальном изменении (шаг 1 мм).
-      const r = (n: number) => Math.round(n * 10);
-      const prev = get().bounds[side];
-      const same = prev === b || (prev && b && r(prev.wCm) === r(b.wCm) && r(prev.hCm) === r(b.hCm));
-      if (prev !== undefined && same) return;
-      set((s) => ({ bounds: { ...s.bounds, [side]: b } }));
-    },
   };
 });
 

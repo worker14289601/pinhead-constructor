@@ -4,9 +4,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchCatalog } from '../api/catalog';
 import { track } from '../analytics/events';
 import { printAreaFor, sidesFor } from '../config/print-areas';
-import { METHOD_INFO } from '../config/pricing';
-import { isLight } from '../canvas/tint';
-import { calcPrice, type SideBounds } from '../model/pricing';
+import { FRAME } from '../config/garment-shapes';
+import { METHOD_INFO, WHITE_MIN_CHANNEL } from '../config/pricing';
+import { hexToRgb, isLight } from '../canvas/tint';
+import { designBounds } from '../model/bounds';
+import { calcPrice } from '../model/pricing';
 import { imageDpi, MIN_DPI, validateFile, ACCEPTED_TYPES } from '../model/quality';
 import { canRedo, canUndo, selectGarment, selectVariant, useConstructor } from '../model/store';
 import { SIDE_LABEL, SIDE_TAB, type PrintMethod } from '../model/types';
@@ -62,7 +64,9 @@ export function ConstructorApp() {
 
   // Cmd/Ctrl+Z — отмена, Cmd/Ctrl+Shift+Z и Ctrl+Y — повтор, Delete — удалить выбранный слой.
   // Когда фокус в поле ввода, клавиши остаются полю (там своя отмена набора).
+  // Пока открыта форма заявки, клавиши холст не трогают.
   useEffect(() => {
+    if (orderOpen) return;
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName))) return;
@@ -82,16 +86,16 @@ export function ConstructorApp() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [orderOpen]);
 
   const hex = variant?.hex ?? '#ffffff';
-  const sidesKey = sides.join(',');
   const price = useMemo(() => {
-    if (!variant) return null;
-    // Печать на стороне, которой у модели нет (рукав у шоппера), в цену не идёт.
-    const bounds: SideBounds = Object.fromEntries(sidesKey.split(',').map((sd) => [sd, st.bounds[sd as keyof SideBounds]]));
-    return calcPrice({ garmentPrice: variant.price, isWhite: isLight(hex), method: st.method, bounds, sizes: st.sizes });
-  }, [variant, hex, st.method, st.bounds, st.sizes, sidesKey]);
+    if (!variant || !garment) return null;
+    // Габарит — только по сторонам модели: печать на рукаве у шоппера в цену не идёт.
+    const bounds = designBounds(garment, st.layers);
+    const isWhite = hexToRgb(hex).every((c) => c >= WHITE_MIN_CHANNEL);
+    return calcPrice({ garmentPrice: variant.price, isWhite, method: st.method, bounds, sizes: st.sizes });
+  }, [variant, garment, hex, st.method, st.layers, st.sizes]);
 
   const onFile = (f?: File) => {
     if (!f || !garment) return;
@@ -107,12 +111,15 @@ export function ConstructorApp() {
       // Вписываем в зону печати: 80% ширины, но не выше 80% высоты зоны.
       const pa = printAreaFor(garment, st.side);
       const areaRatio = pa.height / pa.width; // в единицах кадра: высота/ширина зоны
-      const frameRatio = 460 / 400;
+      const frameRatio = FRAME.h / FRAME.w;
       const width = Math.min(0.8, (0.8 * areaRatio * frameRatio * nw) / nh);
       st.addImage({ src: url, fileName: f.name, isVector, naturalWidth: nw, naturalHeight: nh, width });
       track('image_upload', { w: nw, h: nh, type: f.type, kb: Math.round(f.size / 1024) });
     };
-    img.onerror = () => setFileError('Не получилось открыть файл. Попробуйте PNG или JPG.');
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      setFileError('Не получилось открыть файл. Попробуйте PNG или JPG.');
+    };
     img.src = url;
   };
 
@@ -300,7 +307,7 @@ export function ConstructorApp() {
             <div className={s.breakdown}>
               <div className={s.line}><span>Изделие</span><span>{price.garment} ₽</span></div>
               {price.sides.map((x) => (
-                <div key={x.side} className={s.line}><span>Печать: {SIDE_LABEL[x.side].toLowerCase()} · {x.format}</span><span>{x.price} ₽</span></div>
+                <div key={x.side} className={s.line}><span>Печать: {SIDE_LABEL[x.side].toLowerCase()} · {x.format}{x.oversize ? ' (крупнее формата — уточнит менеджер)' : ''}</span><span>{x.price} ₽</span></div>
               ))}
             </div>
           )}
@@ -315,7 +322,7 @@ export function ConstructorApp() {
             <div className={s.muted}>{price?.qty ? `${price.qty} шт · ${price.perItem} ₽ за шт` : 'Цена примерная, уточнит менеджер'}</div>
           </div>
           <button className={s.cta} onClick={openOrder} aria-disabled={!canOrder}>
-            {!st.layers.length ? 'Добавить дизайн' : !price?.qty ? 'Выбрать размеры' : 'Оформить заявку'}
+            {!hasDesign ? 'Добавить дизайн' : !price?.qty ? 'Выбрать размеры' : 'Оформить заявку'}
           </button>
         </footer>
       </aside>

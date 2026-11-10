@@ -16,6 +16,13 @@ interface Props {
   onClose: () => void;
 }
 
+/** dataURL снимка → PNG. Пустой снимок (браузер не смог создать canvas) — ошибка, а не пустой файл в заявке. */
+async function toPng(dataUrl: string): Promise<Blob> {
+  const blob = await (await fetch(dataUrl)).blob();
+  if (blob.type !== 'image/png' || blob.size === 0) throw new Error('export_empty');
+  return blob;
+}
+
 /** Оформление заявки: контакты + доставка, без онлайн-оплаты. */
 export function OrderForm({ garment, variant, price, stage, onClose }: Props) {
   const { method, sizes, side, setSide, layers } = useConstructor();
@@ -30,17 +37,23 @@ export function OrderForm({ garment, variant, price, stage, onClose }: Props) {
       // Снимаем превью и файлы печати по каждой стороне с принтом.
       const form = new FormData();
       const original = side;
-      for (const sd of sidesFor(garment)) {
-        if (!layers.some((l) => l.side === sd)) continue;
-        setSide(sd);
-        // Даём React перерисовать холст на нужной стороне. Не rAF: он стоит во фоновых вкладках.
-        await new Promise((r) => setTimeout(r, 80));
-        const preview = stage.current?.exportPreview();
-        const print = stage.current?.exportPrint();
-        if (preview) form.append(`preview_${sd}`, await (await fetch(preview)).blob(), `preview_${sd}.png`);
-        if (print) form.append(`print_${sd}`, await (await fetch(print)).blob(), `print_${sd}_300dpi.png`);
+      try {
+        for (const sd of sidesFor(garment)) {
+          if (!layers.some((l) => l.side === sd)) continue;
+          setSide(sd);
+          // Снимок — только когда холст показал эту сторону и загрузил её картинки.
+          if (!stage.current) throw new Error('canvas_missing');
+          await stage.current.whenReady();
+          // Холст перерисовался — берём его методы заново: прежние помнят зону прошлой стороны.
+          const preview = stage.current.exportPreview();
+          const print = stage.current.exportPrint();
+          if (!preview || !print) throw new Error('export_failed');
+          form.append(`preview_${sd}`, await toPng(preview), `preview_${sd}.png`);
+          form.append(`print_${sd}`, await toPng(print.dataUrl), `print_${sd}_${print.dpi}dpi.png`);
+        }
+      } finally {
+        setSide(original);
       }
-      setSide(original);
       form.append('order', JSON.stringify({
         garment: { id: garment.id, name: garment.name, productId: variant.productId, color: variant.colorName },
         method, sizes, price, contacts: c,
@@ -56,7 +69,7 @@ export function OrderForm({ garment, variant, price, stage, onClose }: Props) {
   };
 
   return (
-    <div className={s.modalBg} onClick={onClose}>
+    <div className={s.modalBg} onClick={() => state !== 'sending' && onClose()}>
       <form className={s.modal} onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         {state === 'done' ? (
           <>

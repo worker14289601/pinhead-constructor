@@ -29,6 +29,8 @@ function loadBase(url: string): Promise<ImageData> {
       img.src = url;
     });
     baseCache.set(url, p);
+    // Ошибку загрузки не кэшируем — следующая попытка загрузит мокап заново.
+    p.catch(() => baseCache.delete(url));
   }
   return p;
 }
@@ -44,7 +46,7 @@ function toCanvas(data: Uint8ClampedArray<ArrayBuffer>, w: number, h: number) {
 async function tint(url: string, hex: string) {
   const key = `${url}|${hex}`;
   const hit = tintCache.get(key);
-  if (hit) return { garment: hit, shade: shadeCache.get(url)! };
+  if (hit) return { url, garment: hit, shade: shadeCache.get(url)! };
 
   const base = await loadBase(url);
   const rgb = hexToRgb(hex);
@@ -69,12 +71,15 @@ async function tint(url: string, hex: string) {
     }
     shadeCache.set(url, toCanvas(sh, base.width, base.height));
   }
-  return { garment, shade: shadeCache.get(url)! };
+  return { url, garment, shade: shadeCache.get(url)! };
 }
 
-/** Окрашенный мокап и маска складок. null — пока грузится или мокапа нет. */
+/**
+ * Окрашенный мокап и маска складок. null — пока грузится или мокапа нет.
+ * Пока грузится новый мокап, возвращается прежний; `url` в результате говорит, чей он.
+ */
 export function useTintedMockup(url: string | null, hex: string) {
-  const [res, setRes] = useState<{ garment: HTMLCanvasElement; shade: HTMLCanvasElement } | null>(null);
+  const [res, setRes] = useState<{ url: string; garment: HTMLCanvasElement; shade: HTMLCanvasElement } | null>(null);
   useEffect(() => {
     if (!url) return setRes(null);
     let alive = true;
@@ -84,7 +89,6 @@ export function useTintedMockup(url: string | null, hex: string) {
   return res;
 }
 
-/** Светлый ли цвет — для контраста рамок и текста по умолчанию. */
 /** '#fff' | '#ffffff' → [r, g, b]. */
 export function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace('#', '');

@@ -20,6 +20,12 @@ export const PRINT_PRICE: Record<PrintMethod, Record<PrintFormat, [number, numbe
   dtf: { A6: [400, 500], A5: [500, 650], A4: [650, 800], A3: [800, 900], 'A3+': [900, 1100] },
 };
 
+/**
+ * Цена «на белом» — только для белой ткани: все каналы цвета не ниже порога.
+ * Светлые цветные (молочный, розовый, серый) считаются по цене «на цветном».
+ */
+export const WHITE_MIN_CHANNEL = 240;
+
 export const METHOD_INFO: Record<PrintMethod, { title: string; hint: string }> = {
   dtg: {
     title: 'DTG — прямая печать',

@@ -7,20 +7,29 @@ import { printAreaFor } from '../config/print-areas';
 import { selectGarment, selectVariant, useConstructor } from '../model/store';
 import { isSleeve } from '../model/types';
 import { alignLayer, snapToCenter, type AlignMode } from './align';
-import { DESIGN_NODE, LayerNode } from './LayerNode';
+import { LayerNode } from './LayerNode';
 import { SILHOUETTES, SILHOUETTE_VIEWBOX } from './silhouettes';
 import { isLight, useTintedMockup } from './tint';
 
 export interface DesignStageHandle {
   /** PNG текущей стороны с изделием — превью для клиента и менеджера. */
   exportPreview: () => string | null;
-  /** PNG принта (без изделия, прозрачный фон) в 300 dpi по реальной ширине зоны. */
-  exportPrint: () => string | null;
+  /**
+   * PNG принта (без изделия, прозрачный фон) по реальной ширине зоны: 300 dpi,
+   * для самых больших зон — меньше, чтобы файл уложился в предел размера canvas.
+   */
+  exportPrint: () => { dataUrl: string; dpi: number } | null;
+  /** Ждёт, пока холст покажет текущую сторону целиком: мокап и все картинки слоёв загружены. */
+  whenReady: (timeoutMs?: number) => Promise<void>;
   /** Выровнять слой в зоне печати (одним шагом истории). */
   align: (id: string, mode: AlignMode) => void;
 }
 
 const DPI = 300;
+/** Предел площади canvas в мобильных браузерах — около 16,7 Мп; больше — снимок выйдет пустым. */
+const MAX_EXPORT_AREA = 16_000_000;
+/** Меньше этого размера (px экрана) рамка трансформации слой не сжимает. */
+const MIN_NODE_PX = 12;
 /** Максимальное приближение маленькой зоны (рукав): мокапы 800×920, дальше картинка мылится. */
 const MAX_ZOOM = 2.4;
 /** Порог прилипания к центру зоны, в пикселях экрана. */
@@ -40,7 +49,7 @@ export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }
 
   const garment = useConstructor(selectGarment);
   const variant = useConstructor(selectVariant);
-  const { side, layers, selectedLayerId, selectLayer, updateLayer, setBounds } = useConstructor();
+  const { side, layers, selectedLayerId, selectLayer, updateLayer } = useConstructor();
 
   const shape = garment?.shapeId ? SHAPES[garment.shapeId] : null;
   const hex = variant?.hex ?? '#e4e4e4';
@@ -94,23 +103,18 @@ export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }
     tr.getLayer()?.batchDraw();
   });
 
-  // Габарит принта в см — для расчёта формата и цены.
-  useEffect(() => {
+  // Готов ли холст к снимку: показана сторона из стора, её мокап и картинки всех слоёв загружены.
+  const isReady = useRef<() => boolean>(() => false);
+  isReady.current = () => {
+    const st = useConstructor.getState();
     const g = printRef.current;
-    if (!g || !pa || !area) return;
-    const nodes = g.find(`.${DESIGN_NODE}`);
-    if (!nodes.length) return setBounds(side, null);
-    let [x1, y1, x2, y2] = [Infinity, Infinity, -Infinity, -Infinity];
-    for (const n of nodes) {
-      const r = n.getClientRect({ relativeTo: g, skipShadow: true, skipStroke: true });
-      x1 = Math.min(x1, Math.max(0, r.x));
-      y1 = Math.min(y1, Math.max(0, r.y));
-      x2 = Math.max(x2, Math.min(area.w, r.x + r.width));
-      y2 = Math.max(y2, Math.min(area.h, r.y + r.height));
-    }
-    const cmPerPx = pa.widthCm / area.w;
-    setBounds(side, x2 > x1 && y2 > y1 ? { wCm: (x2 - x1) * cmPerPx, hCm: (y2 - y1) * cmPerPx } : null);
-  });
+    if (st.side !== side || !g) return false;
+    if (shape && mockup?.url !== shape.images[side]) return false;
+    return st.layers.filter((l) => l.side === side).every((l) => {
+      const n = g.findOne(`#${l.id}`);
+      return !!n && (l.kind !== 'image' || !!(n as Konva.Image).image());
+    });
+  };
 
   /** Временно прячет служебные узлы на время снимка. */
   const withHidden = <T,>(nodes: Array<Konva.Node | null>, fn: () => T): T => {
@@ -133,10 +137,24 @@ export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }
       const w = area.w * view.k;
       const h = area.h * view.k;
       // Файл для печати — без складок ткани.
-      return withHidden([shadeRef.current, trRef.current], () =>
-        g.toDataURL({ x: at.x, y: at.y, width: w, height: h, pixelRatio: targetPx / w }),
+      const full = targetPx / w;
+      const ratio = Math.min(full, Math.sqrt(MAX_EXPORT_AREA / (w * h)));
+      const dataUrl = withHidden([shadeRef.current, trRef.current], () =>
+        g.toDataURL({ x: at.x, y: at.y, width: w, height: h, pixelRatio: ratio }),
       );
+      return { dataUrl, dpi: Math.round((DPI * ratio) / full) };
     },
+    whenReady: (timeoutMs = 8000) =>
+      new Promise<void>((resolve, reject) => {
+        const started = Date.now();
+        // Не rAF: в фоновой вкладке он не срабатывает.
+        const check = () => {
+          if (isReady.current()) return resolve();
+          if (Date.now() - started > timeoutMs) return reject(new Error('canvas_not_ready'));
+          setTimeout(check, 40);
+        };
+        setTimeout(check, 0);
+      }),
     align: (id, mode) => {
       const g = printRef.current;
       const node = g?.findOne(`#${id}`);
@@ -145,8 +163,12 @@ export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }
       const rect = node.getClientRect({ relativeTo: g, skipShadow: true, skipStroke: true });
       if (!rect.width || !rect.height) return;
       const r = alignLayer(mode, { x: node.x(), y: node.y() }, rect, { w: area.w, h: area.h });
+      const moved = Math.abs(r.x - node.x()) > 0.5 || Math.abs(r.y - node.y()) > 0.5;
+      const scaled = Math.abs(r.scale - 1) > 1e-3;
+      // Слой уже стоит как надо — не добавляем пустой шаг в историю.
+      if (!moved && !scaled) return;
       const pos = { x: r.x / area.w, y: r.y / area.h };
-      if (r.scale === 1) return updateLayer(id, pos);
+      if (!scaled) return updateLayer(id, pos);
       updateLayer(id, layer.kind === 'image' ? { ...pos, width: layer.width * r.scale } : { ...pos, fontSize: layer.fontSize * r.scale });
     },
   }));
@@ -228,6 +250,8 @@ export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }
           <Transformer
             ref={trRef}
             keepRatio
+            flipEnabled={false}
+            boundBoxFunc={(prev, next) => (Math.abs(next.width) < MIN_NODE_PX || Math.abs(next.height) < MIN_NODE_PX ? prev : next)}
             enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right']}
             rotationSnaps={[0, 90, 180, 270]}
             anchorSize={12}

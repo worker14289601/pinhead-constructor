@@ -15,7 +15,8 @@ export function formatFor(wCm: number, hCm: number): PrintFormat {
 
 export interface PriceBreakdown {
   garment: number;
-  sides: Array<{ side: Side; format: PrintFormat; price: number }>;
+  /** oversize — принт больше самого крупного формата: цену такой печати подтверждает менеджер. */
+  sides: Array<{ side: Side; format: PrintFormat; price: number; oversize: boolean }>;
   perItem: number;
   qty: number;
   total: number;
@@ -33,7 +34,9 @@ export function calcPrice(args: {
     .map(([side, b]) => {
       const format = formatFor(b!.wCm, b!.hCm);
       const price = PRINT_PRICE[args.method][format][args.isWhite ? 0 : 1];
-      return { side, format, price };
+      const max = FORMAT_MAX_CM[format];
+      const oversize = Math.min(b!.wCm, b!.hCm) > max.w || Math.max(b!.wCm, b!.hCm) > max.h;
+      return { side, format, price, oversize };
     });
   const perItem = args.garmentPrice + sides.reduce((s, x) => s + x.price, 0);
   const qty = Object.values(args.sizes).reduce((s, n) => s + n, 0);
