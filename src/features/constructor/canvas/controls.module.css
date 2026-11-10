@@ -1,0 +1,27 @@
+/* Кнопки выбранного слоя поверх холста — в стиле конструктора: чёрный контур, лайм, белый фон. */
+.overlay { position: absolute; inset: 0; pointer-events: none; }
+.stem { position: absolute; inset: 0; overflow: visible; }
+.stem line { stroke-width: 1.5; }
+
+.btn, .btnAccent, .btnDanger {
+  position: absolute; width: 32px; height: 32px; transform: translate(-50%, -50%);
+  padding: 0; display: grid; place-items: center;
+  border: 1.5px solid #000; border-radius: 50%; background: #fff; color: #000;
+  pointer-events: auto; touch-action: none; cursor: grab; user-select: none;
+  box-shadow: 0 2px 6px rgb(0 0 0 / .25);
+}
+.btn:active, .btnAccent:active { cursor: grabbing; }
+.btnAccent { background: #99ff00; cursor: nwse-resize; }
+.btnAccent:active { cursor: nwse-resize; }
+.btnDanger { background: #d32f2f; border-color: #d32f2f; color: #fff; cursor: pointer; }
+.btn:hover { background: #efffd9; }
+.btnDanger:hover { background: #b71c1c; }
+.btn svg, .btnAccent svg, .btnDanger svg {
+  width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+.btn:focus-visible, .btnAccent:focus-visible, .btnDanger:focus-visible { outline: 2px solid #000; outline-offset: 2px; }
+
+/* Крупнее под палец */
+@media (pointer: coarse) {
+  .btn, .btnAccent, .btnDanger { width: 36px; height: 36px; }
+}

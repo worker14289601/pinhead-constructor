@@ -12,6 +12,7 @@ import { designBounds } from '../model/bounds';
 import { calcPrice } from '../model/pricing';
 import { imageDpi, MIN_DPI, validateFile, ACCEPTED_TYPES } from '../model/quality';
 import { canRedo, canUndo, selectGarment, selectVariant, useConstructor } from '../model/store';
+import { contentBox } from '../model/trim';
 import { SIDE_LABEL, SIDE_TAB, type PrintMethod } from '../model/types';
 import type { DesignStageHandle } from '../canvas/DesignStage';
 import { LayersPanel } from './LayersPanel';
@@ -109,15 +110,17 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
     const img = new window.Image();
     img.onload = () => {
       const isVector = f.type === 'image/svg+xml';
-      const nw = img.naturalWidth || 1000;
-      const nh = img.naturalHeight || 1000;
+      // Пустые поля по краям в размер принта не идут — обрезаем их сразу.
+      const crop = contentBox(img) ?? undefined;
+      const nw = crop?.width ?? (img.naturalWidth || 1000);
+      const nh = crop?.height ?? (img.naturalHeight || 1000);
       // Вписываем в зону печати: 80% ширины, но не выше 80% высоты зоны.
       const pa = printAreaFor(garment, st.side);
       const areaRatio = pa.height / pa.width; // в единицах кадра: высота/ширина зоны
       const frameRatio = FRAME.h / FRAME.w;
       const width = Math.min(0.8, (0.8 * areaRatio * frameRatio * nw) / nh);
-      st.addImage({ src: url, fileName: f.name, isVector, naturalWidth: nw, naturalHeight: nh, width });
-      track('image_upload', { w: nw, h: nh, type: f.type, kb: Math.round(f.size / 1024) });
+      st.addImage({ src: url, fileName: f.name, isVector, naturalWidth: nw, naturalHeight: nh, crop, width });
+      track('image_upload', { w: nw, h: nh, type: f.type, kb: Math.round(f.size / 1024), trimmed: !!crop });
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
@@ -161,23 +164,6 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
             </button>
           ))}
         </div>
-        {garment && (
-          <>
-            <h3 className={s.h}>Цвет · {variant?.colorName}</h3>
-            <div className={s.colors}>
-              {garment.variants.map((v) => (
-                <button
-                  key={v.productId}
-                  className={v.productId === st.variantId ? s.swatchActive : s.swatch}
-                  style={{ background: v.hex }}
-                  title={v.colorName}
-                  aria-label={v.colorName}
-                  onClick={() => { st.selectVariant(v.productId); track('color_select', { color: v.colorName }); }}
-                />
-              ))}
-            </div>
-          </>
-        )}
       </section>
 
       {/* Холст */}
@@ -202,11 +188,31 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
         </div>
         <div className={s.stage}>
           <DesignStage apiRef={stageRef} />
+          {!sideHasLayers && garment && (
+            <button className={s.emptyHint} onClick={() => { setTab('design'); fileRef.current?.click(); }}>
+              + Добавьте картинку или текст
+            </button>
+          )}
         </div>
-        {!sideHasLayers && garment && (
-          <button className={s.emptyHint} onClick={() => { setTab('design'); fileRef.current?.click(); }}>
-            + Загрузите картинку или добавьте текст
-          </button>
+        {/* Цвет — под изделием: меняется в один клик с любого экрана, без прокрутки панелей. */}
+        {garment && garment.variants.length > 0 && (
+          <div className={s.colorBar} role="radiogroup" aria-label="Цвет изделия">
+            <div className={s.colors}>
+              {garment.variants.map((v) => (
+                <button
+                  key={v.productId}
+                  role="radio"
+                  aria-checked={v.productId === st.variantId}
+                  className={v.productId === st.variantId ? s.swatchActive : s.swatch}
+                  style={{ background: v.hex }}
+                  title={v.colorName}
+                  aria-label={v.colorName}
+                  onClick={() => { st.selectVariant(v.productId); track('color_select', { color: v.colorName }); }}
+                />
+              ))}
+            </div>
+            <span className={s.colorName}>{variant?.colorName}</span>
+          </div>
         )}
       </main>
 
@@ -267,6 +273,9 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
                   ? `Качество печати хорошее (${dpi} dpi).`
                   : `Низкое разрешение (${dpi} dpi) — при таком размере печать может выйти нечёткой. Уменьшите картинку или загрузите файл побольше.`}
             </p>
+          )}
+          {selected?.kind === 'image' && selected.crop && (
+            <p className={s.muted}>Пустые поля по краям убрали — размер и цена считаются по самому рисунку.</p>
           )}
           {selected && (
             <div className={s.align} role="group" aria-label="Выравнивание">

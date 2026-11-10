@@ -83,8 +83,11 @@ export interface ImageLayer extends LayerBase {
   fileName: string;
   /** SVG — масштабируется без потери качества, dpi не проверяем. */
   isVector: boolean;
+  /** Размер рисунка в пикселях — после обрезки пустых полей, если она была. */
   naturalWidth: number;
   naturalHeight: number;
+  /** Видимая часть исходной картинки без пустых полей (пиксели исходника). Нет — картинка целиком. */
+  crop?: import('./trim').CropRect;
   width: number; // доля ширины зоны печати
 }
 

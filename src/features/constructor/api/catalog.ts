@@ -16,8 +16,17 @@ export function modelNameOf(p: ApiProduct): string {
   return words.length > 2 ? words.slice(0, -1).join(' ') : p.name;
 }
 
+/**
+ * Цвета, у которых stageColor из API не похож на ткань на плоском мокапе
+ * (подобран под освещение 3D-сцены): чёрный там #424242 и выглядит тёмно-серым.
+ */
+const COLOR_OVERRIDE: Record<string, string> = {
+  черный: '#1c1c1c',
+};
+
 function toVariant(p: ApiProduct): GarmentVariant {
-  const hex = p.stageColor || COLOR_FALLBACK[p.color.toLowerCase()] || '#d9d9d9';
+  const name = p.color.toLowerCase().replace('ё', 'е');
+  const hex = COLOR_OVERRIDE[name] || p.stageColor || COLOR_FALLBACK[name] || '#d9d9d9';
   // editor_*_view в API — относительные пути, которые сейчас отдают 404; берём только абсолютные URL.
   const abs = (u: string) => (u?.startsWith('http') ? u : undefined);
   return {

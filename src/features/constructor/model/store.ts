@@ -7,7 +7,7 @@ import type {
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
-type NewImage = Pick<ImageLayer, 'src' | 'fileName' | 'isVector' | 'naturalWidth' | 'naturalHeight' | 'width'>;
+type NewImage = Pick<ImageLayer, 'src' | 'fileName' | 'isVector' | 'naturalWidth' | 'naturalHeight' | 'crop' | 'width'>;
 
 /** Шаг истории: дизайн до действия и сторона, на которой оно было сделано. */
 interface Snapshot {

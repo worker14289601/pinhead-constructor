@@ -8,6 +8,7 @@ import { selectGarment, selectVariant, useConstructor } from '../model/store';
 import { isSleeve } from '../model/types';
 import { alignLayer, snapToCenter, type AlignMode } from './align';
 import { LayerNode } from './LayerNode';
+import { SelectionControls } from './SelectionControls';
 import { SILHOUETTES, SILHOUETTE_VIEWBOX } from './silhouettes';
 import { isLight, useTintedMockup } from './tint';
 
@@ -28,7 +29,7 @@ export interface DesignStageHandle {
 const DPI = 300;
 /** Предел площади canvas в мобильных браузерах — около 16,7 Мп; больше — снимок выйдет пустым. */
 const MAX_EXPORT_AREA = 16_000_000;
-/** Меньше этого размера (px экрана) рамка трансформации слой не сжимает. */
+/** Меньше этого размера (px экрана) кнопка размера слой не сжимает. */
 const MIN_NODE_PX = 12;
 /** Максимальное приближение маленькой зоны (рукав): мокапы 800×920, дальше картинка мылится. */
 const MAX_ZOOM = 2.4;
@@ -51,7 +52,7 @@ export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }
 
   const garment = useConstructor(selectGarment);
   const variant = useConstructor(selectVariant);
-  const { side, layers, selectedLayerId, selectLayer, updateLayer } = useConstructor();
+  const { side, layers, selectedLayerId, selectLayer, updateLayer, removeLayer, duplicateLayer } = useConstructor();
 
   const shape = garment?.shapeId ? SHAPES[garment.shapeId] : null;
   const hex = variant?.hex ?? '#e4e4e4';
@@ -183,6 +184,7 @@ export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }
 
   return (
     <div ref={wrapRef} style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center' }}>
+      <div style={{ position: 'relative', width: size.w, height: size.h }}>
       <Stage
         ref={stageRef} width={size.w} height={size.h}
         scaleX={view.k} scaleY={view.k} x={view.x} y={view.y}
@@ -250,23 +252,31 @@ export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }
               {guides.h && <Line points={[0, area.h / 2, area.w, area.h / 2]} stroke={accent} strokeWidth={1} strokeScaleEnabled={false} />}
             </Group>
           )}
+          {/* Только рамка вплотную к принту; поворот, размер и удаление — кнопки SelectionControls. */}
           <Transformer
             ref={trRef}
-            keepRatio
-            flipEnabled={false}
-            boundBoxFunc={(prev, next) => (Math.abs(next.width) < MIN_NODE_PX || Math.abs(next.height) < MIN_NODE_PX ? prev : next)}
-            enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right']}
-            rotationSnaps={[0, 90, 180, 270]}
-            anchorSize={12}
-            padding={6}
+            resizeEnabled={false}
+            rotateEnabled={false}
+            padding={0}
             borderStroke={accent}
             borderStrokeWidth={1.5}
-            anchorFill={LIME}
-            anchorStroke={INK}
-            anchorCornerRadius={2}
           />
         </Layer>
       </Stage>
+      {area && (
+        <SelectionControls
+          stage={stageRef.current}
+          layer={sideLayers.find((l) => l.id === selectedLayerId)}
+          area={{ w: area.w, h: area.h }}
+          size={size}
+          minPx={MIN_NODE_PX}
+          accent={accent}
+          onCommit={(p) => selectedLayerId && updateLayer(selectedLayerId, p)}
+          onRemove={() => selectedLayerId && removeLayer(selectedLayerId)}
+          onDuplicate={() => selectedLayerId && duplicateLayer(selectedLayerId)}
+        />
+      )}
+      </div>
     </div>
   );
 }

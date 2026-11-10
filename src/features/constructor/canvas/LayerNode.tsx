@@ -1,8 +1,8 @@
 'use client';
-import { useLayoutEffect, useRef } from 'react';
-import { Image as KImage, Text as KText } from 'react-konva';
+import { Image as KImage, Shape } from 'react-konva';
 import useImage from 'use-image';
 import type Konva from 'konva';
+import { measureText, textFont } from '../model/trim';
 import type { DesignLayer } from '../model/types';
 
 interface Props {
@@ -21,16 +21,6 @@ export const DESIGN_NODE = 'design';
 /** Слой дизайна. Координаты хранятся в долях зоны печати, на экране — пиксели. */
 export function LayerNode({ layer, area, onSelect, onChange, onDrag }: Props) {
   const [img] = useImage(layer.kind === 'image' ? layer.src : '', 'anonymous');
-  const textRef = useRef<Konva.Text>(null);
-
-  // Текст позиционируется по центру: точка (x, y) — середина надписи.
-  useLayoutEffect(() => {
-    const n = textRef.current;
-    if (!n) return;
-    n.offsetX(n.width() / 2);
-    n.offsetY(n.height() / 2);
-    n.getLayer()?.batchDraw();
-  });
 
   const common = {
     id: layer.id,
@@ -57,22 +47,44 @@ export function LayerNode({ layer, area, onSelect, onChange, onDrag }: Props) {
     },
   };
 
-  return layer.kind === 'image' ? (
-    <KImage
+  if (layer.kind === 'image') {
+    return (
+      <KImage
+        {...common}
+        image={img}
+        crop={layer.crop}
+        width={layer.width * area.w}
+        height={(layer.width * area.w * layer.naturalHeight) / layer.naturalWidth}
+      />
+    );
+  }
+
+  // Текст рисуем сами: у Konva.Text рамка — строка шрифта с запасом сверху и снизу,
+  // а нужна рамка по буквам. Точка (x, y) — середина надписи.
+  const fontPx = layer.fontSize * area.w;
+  const box = measureText(layer.text, layer.fontFamily, fontPx, layer.align);
+  return (
+    <Shape
       {...common}
-      image={img}
-      width={layer.width * area.w}
-      height={(layer.width * area.w * layer.naturalHeight) / layer.naturalWidth}
-    />
-  ) : (
-    <KText
-      {...common}
-      ref={textRef}
-      text={layer.text}
-      fontFamily={layer.fontFamily}
-      fontSize={layer.fontSize * area.w}
+      width={box.width}
+      height={box.height}
+      offsetX={box.width / 2}
+      offsetY={box.height / 2}
       fill={layer.fill}
-      align={layer.align}
+      sceneFunc={(ctx, shape) => {
+        const c = ctx._context;
+        c.font = textFont(layer.fontFamily, fontPx);
+        c.textAlign = 'left';
+        c.textBaseline = 'alphabetic';
+        c.fillStyle = shape.fill() as string;
+        for (const l of box.lines) c.fillText(l.text, l.x, l.y);
+      }}
+      hitFunc={(ctx, shape) => {
+        ctx.beginPath();
+        ctx.rect(0, 0, box.width, box.height);
+        ctx.closePath();
+        ctx.fillStrokeShape(shape);
+      }}
     />
   );
 }

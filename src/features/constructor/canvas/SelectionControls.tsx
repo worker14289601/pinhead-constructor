@@ -1,0 +1,198 @@
+'use client';
+import { useEffect, useLayoutEffect, useReducer, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import type Konva from 'konva';
+import type { DesignLayer } from '../model/types';
+import c from './controls.module.css';
+
+/**
+ * Кнопки выбранного слоя поверх холста: поворот (сверху, на «ножке»), размер (правый нижний угол),
+ * удаление (правый верхний угол), дубль (левый верхний угол). Это HTML, а не узлы Konva: кнопки крупные, с иконками,
+ * не поворачиваются вместе с принтом и не попадают ни в превью, ни в файл печати.
+ * Пока кнопку тянут, меняется только узел холста; в стор правка уходит одним шагом при отпускании.
+ */
+
+/** Размер кнопки, px (на сенсорных экранах CSS делает её крупнее). */
+const BTN = 32;
+/** Длина «ножки» от верхнего края принта до центра кнопки поворота, px. */
+const STEM = 48;
+/** Угловые кнопки вынесены наружу на столько по каждой оси — не закрывают принт и не налезают друг на друга. */
+const OUT = BTN / 2 + 2;
+/** Прилипание поворота к 0/90/180/270°, градусы. */
+const SNAP_DEG = 5;
+
+interface Props {
+  stage: Konva.Stage | null;
+  layer: DesignLayer | undefined;
+  /** Размер зоны печати в пикселях холста (без приближения). */
+  area: { w: number; h: number };
+  /** Размер холста — кнопки не выходят за его края. */
+  size: { w: number; h: number };
+  /** Меньше этого размера (px экрана) принт не сжимается. */
+  minPx: number;
+  /** Цвет «ножки» — контрастный к ткани. */
+  accent: string;
+  onCommit: (patch: Partial<DesignLayer>) => void;
+  onRemove: () => void;
+  onDuplicate: () => void;
+}
+
+interface Pt { x: number; y: number }
+interface Geo { top: Pt; rotate: Pt; resize: Pt; remove: Pt; duplicate: Pt }
+
+type Gesture =
+  | { mode: 'rotate'; center: Pt; startAngle: number; rotation0: number }
+  | { mode: 'resize'; center: Pt; dist0: number };
+
+const deg = (rad: number) => (rad * 180) / Math.PI;
+
+/** Точка середины узла в координатах холста. */
+function centerOf(node: Konva.Node): Pt {
+  return node.getAbsoluteTransform().point({ x: node.width() / 2, y: node.height() / 2 });
+}
+
+/** Сдвигает узел так, чтобы его середина вернулась в точку `center` (после поворота или масштаба). */
+function keepCenter(node: Konva.Node, center: Pt) {
+  const parent = node.getParent();
+  if (!parent) return;
+  const inv = parent.getAbsoluteTransform().copy().invert();
+  const now = inv.point(centerOf(node));
+  const want = inv.point(center);
+  node.position({ x: node.x() + want.x - now.x, y: node.y() + want.y - now.y });
+}
+
+function geometry(node: Konva.Node, size: { w: number; h: number }): Geo {
+  const t = node.getAbsoluteTransform();
+  const w = node.width();
+  const h = node.height();
+  const top = t.point({ x: w / 2, y: 0 });
+  // Смещения считаются в осях принта и поворачиваются вместе с ним.
+  const a = (node.getAbsoluteRotation() * Math.PI) / 180;
+  const turn = (p: Pt, dx: number, dy: number): Pt => ({
+    x: p.x + dx * Math.cos(a) - dy * Math.sin(a),
+    y: p.y + dx * Math.sin(a) + dy * Math.cos(a),
+  });
+  const clamp = (p: Pt): Pt => ({
+    x: Math.min(size.w - BTN / 2, Math.max(BTN / 2, p.x)),
+    y: Math.min(size.h - BTN / 2, Math.max(BTN / 2, p.y)),
+  });
+  return {
+    top,
+    rotate: clamp(turn(top, 0, -STEM)),
+    resize: clamp(turn(t.point({ x: w, y: h }), OUT, OUT)),
+    remove: clamp(turn(t.point({ x: w, y: 0 }), OUT, -OUT)),
+    duplicate: clamp(turn(t.point({ x: 0, y: 0 }), -OUT, -OUT)),
+  };
+}
+
+const same = (a: Geo | null, b: Geo | null) => JSON.stringify(a) === JSON.stringify(b);
+
+export function SelectionControls({ stage, layer, area, size, minPx, accent, onCommit, onRemove, onDuplicate }: Props) {
+  const [geo, setGeo] = useState<Geo | null>(null);
+  const [, bump] = useReducer((n: number) => n + 1, 0);
+  const gesture = useRef<Gesture | null>(null);
+  const node = layer && stage ? stage.findOne(`#${layer.id}`) : undefined;
+
+  // Холст обновляется в эффекте Stage (он выше в дереве) — здесь узел уже на месте.
+  // Без списка зависимостей намеренно: узел меняется вне React. Цикла нет — setGeo только при изменении.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => {
+    // Узел ищем заново: новый слой мог появиться на холсте уже после рендера этого компонента.
+    const n = layer && stage ? stage.findOne(`#${layer.id}`) : undefined;
+    const next = n && n.isVisible() ? geometry(n, size) : null;
+    if (!same(next, geo)) setGeo(next);
+    // Слой выбран, а узла ещё нет — проверим снова чуть позже.
+    if (layer && !n) {
+      const t = setTimeout(bump, 50);
+      return () => clearTimeout(t);
+    }
+  });
+
+  // Перетаскивание самого принта двигает и кнопки.
+  useEffect(() => {
+    if (!node) return;
+    node.on('dragmove.controls dragend.controls', bump);
+    return () => { node.off('.controls'); };
+  }, [node]);
+
+  if (!layer || !node || !geo) return null;
+
+  const pointer = (e: ReactPointerEvent): Pt => {
+    const r = stage!.container().getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  };
+
+  const start = (mode: Gesture['mode']) => (e: ReactPointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* указатель уже отпущен */ }
+    const center = centerOf(node);
+    const p = pointer(e);
+    gesture.current = mode === 'rotate'
+      ? { mode, center, startAngle: deg(Math.atan2(p.y - center.y, p.x - center.x)), rotation0: node.rotation() }
+      : { mode, center, dist0: Math.max(1, Math.hypot(p.x - center.x, p.y - center.y)) };
+  };
+
+  const move = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    const g = gesture.current;
+    if (!g) return;
+    const p = pointer(e);
+    if (g.mode === 'rotate') {
+      let r = g.rotation0 + deg(Math.atan2(p.y - g.center.y, p.x - g.center.x)) - g.startAngle;
+      r = ((r % 360) + 540) % 360 - 180; // (-180, 180]
+      for (const s of [-180, -90, 0, 90, 180]) if (Math.abs(r - s) <= SNAP_DEG) r = s === -180 ? 180 : s;
+      node.rotation(r);
+    } else {
+      const k = Math.hypot(p.x - g.center.x, p.y - g.center.y) / g.dist0;
+      // Не меньше minPx на экране по обеим сторонам.
+      const view = node.getAbsoluteScale().x / (node.scaleX() || 1);
+      const minK = minPx / Math.max(1e-6, Math.min(node.width(), node.height()) * view);
+      node.scale({ x: Math.max(k, minK), y: Math.max(k, minK) });
+    }
+    keepCenter(node, g.center);
+    node.getLayer()?.batchDraw();
+    bump();
+  };
+
+  const end = () => {
+    const g = gesture.current;
+    if (!g) return;
+    gesture.current = null;
+    const sx = node.scaleX();
+    node.scale({ x: 1, y: 1 });
+    const base = { x: node.x() / area.w, y: node.y() / area.h, rotation: node.rotation() };
+    if (g.mode === 'rotate') return onCommit(base);
+    onCommit(layer.kind === 'image' ? { ...base, width: (node.width() * sx) / area.w } : { ...base, fontSize: layer.fontSize * sx });
+  };
+
+  // Кнопка центрируется на точке через CSS: под палец она крупнее, чем BTN.
+  const at = (p: Pt) => ({ left: p.x, top: p.y });
+  const handlers = (mode: Gesture['mode']) => ({
+    onPointerDown: start(mode), onPointerMove: move, onPointerUp: end, onPointerCancel: end,
+  });
+
+  return (
+    <div className={c.overlay}>
+      <svg className={c.stem} width={size.w} height={size.h} aria-hidden>
+        <line x1={geo.top.x} y1={geo.top.y} x2={geo.rotate.x} y2={geo.rotate.y} stroke={accent} />
+      </svg>
+      <button type="button" className={c.btn} style={at(geo.rotate)} aria-label="Повернуть" title="Повернуть" {...handlers('rotate')}>
+        <svg viewBox="0 0 24 24" aria-hidden><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8" /><path d="M21 3v5h-5" /></svg>
+      </button>
+      <button type="button" className={c.btnAccent} style={at(geo.resize)} aria-label="Изменить размер" title="Изменить размер" {...handlers('resize')}>
+        <svg viewBox="0 0 24 24" aria-hidden><path d="M5 5 19 19M5 5h5M5 5v5M14 19h5M19 19v-5" /></svg>
+      </button>
+      <button
+        type="button" className={c.btn} style={at(geo.duplicate)} aria-label="Дублировать" title="Дублировать"
+        onPointerDown={(e) => e.stopPropagation()} onClick={onDuplicate}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></svg>
+      </button>
+      <button
+        type="button" className={c.btnDanger} style={at(geo.remove)} aria-label="Удалить" title="Удалить"
+        onPointerDown={(e) => e.stopPropagation()} onClick={onRemove}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6" /></svg>
+      </button>
+    </div>
+  );
+}

@@ -1,21 +1,11 @@
 import { FRAME } from '../config/garment-shapes';
 import { printAreaFor, sidesFor } from '../config/print-areas';
 import type { SideBounds } from './pricing';
+import { measureText } from './trim';
 import type { DesignLayer, Garment } from './types';
 
 /** Условная ширина зоны в пикселях: геометрия считается в них, результат переводится в см. */
 const W = 1000;
-
-let ctx: CanvasRenderingContext2D | null | undefined;
-
-/** Ширина строки тем же способом, что и на холсте (canvas measureText). Вне браузера — 0. */
-function textWidth(text: string, fontFamily: string, fontPx: number): number {
-  if (typeof document === 'undefined') return 0;
-  if (ctx === undefined) ctx = document.createElement('canvas').getContext('2d');
-  if (!ctx) return 0;
-  ctx.font = `normal normal ${fontPx}px ${fontFamily}`;
-  return Math.max(0, ...text.split('\n').map((line) => ctx!.measureText(line).width));
-}
 
 /** Габарит слоя в пикселях зоны с учётом поворота. Повторяет геометрию узлов холста. */
 function layerRect(l: DesignLayer, h: number) {
@@ -27,10 +17,9 @@ function layerRect(l: DesignLayer, h: number) {
     const w = l.width * W;
     local = [0, 0, w, (w * l.naturalHeight) / l.naturalWidth];
   } else {
-    const fontPx = l.fontSize * W;
-    const tw = textWidth(l.text, l.fontFamily, fontPx);
-    const th = fontPx * l.text.split('\n').length;
-    local = [-tw / 2, -th / 2, tw / 2, th / 2];
+    // Габарит по буквам — тот же, что у узла на холсте.
+    const box = measureText(l.text, l.fontFamily, l.fontSize * W, l.align);
+    local = [-box.width / 2, -box.height / 2, box.width / 2, box.height / 2];
   }
   const [lx1, ly1, lx2, ly2] = local;
   const a = (l.rotation * Math.PI) / 180;
