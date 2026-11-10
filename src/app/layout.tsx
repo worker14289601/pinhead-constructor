@@ -1,5 +1,13 @@
 import type { Metadata, Viewport } from 'next';
 import Script from 'next/script';
+import { Manrope, Unbounded } from 'next/font/google';
+
+/**
+ * Заменители фирменных шрифтов сайта (Neue Machina, Druk Text Wide) — только для стенда.
+ * На сайте фирменные шрифты уже подключены, и конструктор берёт их по имени.
+ */
+const bodyFont = Manrope({ subsets: ['latin', 'cyrillic'], weight: ['400', '700', '800'], variable: '--pnhd-font-body-fallback' });
+const headFont = Unbounded({ subsets: ['latin', 'cyrillic'], weight: ['700'], variable: '--pnhd-font-head-fallback' });
 
 export const metadata: Metadata = {
   title: 'Конструктор одежды — Pinhead Studio',
@@ -13,7 +21,7 @@ const YM_ID = Number(process.env.NEXT_PUBLIC_YM_COUNTER_ID) || 0;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ru">
+    <html lang="ru" className={`${bodyFont.variable} ${headFont.variable}`}>
       <body style={{ margin: 0 }}>
         {children}
         {YM_ID > 0 && (

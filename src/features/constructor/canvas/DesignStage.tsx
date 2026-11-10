@@ -34,7 +34,9 @@ const MIN_NODE_PX = 12;
 const MAX_ZOOM = 2.4;
 /** Порог прилипания к центру зоны, в пикселях экрана. */
 const SNAP_PX = 6;
-const ACCENT = '#ff4f00';
+/** Фирменный лайм; на светлой ткани он не виден, поэтому рамка и направляющие там чёрные. */
+const LIME = '#99ff00';
+const INK = '#000000';
 
 /** apiRef — обычный проп, а не ref: next/dynamic не пробрасывает ref в ленивый компонент. */
 export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }) {
@@ -55,6 +57,7 @@ export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }
   const hex = variant?.hex ?? '#e4e4e4';
   const mockup = useTintedMockup(shape?.images[side] ?? null, hex);
   const light = isLight(hex);
+  const accent = light ? INK : LIME;
 
   // Холст тянется по контейнеру с пропорциями кадра 400×460.
   useEffect(() => {
@@ -243,8 +246,8 @@ export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }
         <Layer>
           {area && (guides.v || guides.h) && (
             <Group x={area.x} y={area.y} listening={false}>
-              {guides.v && <Line points={[area.w / 2, 0, area.w / 2, area.h]} stroke={ACCENT} strokeWidth={1} strokeScaleEnabled={false} />}
-              {guides.h && <Line points={[0, area.h / 2, area.w, area.h / 2]} stroke={ACCENT} strokeWidth={1} strokeScaleEnabled={false} />}
+              {guides.v && <Line points={[area.w / 2, 0, area.w / 2, area.h]} stroke={accent} strokeWidth={1} strokeScaleEnabled={false} />}
+              {guides.h && <Line points={[0, area.h / 2, area.w, area.h / 2]} stroke={accent} strokeWidth={1} strokeScaleEnabled={false} />}
             </Group>
           )}
           <Transformer
@@ -256,8 +259,11 @@ export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }
             rotationSnaps={[0, 90, 180, 270]}
             anchorSize={12}
             padding={6}
-            borderStroke={ACCENT}
-            anchorStroke={ACCENT}
+            borderStroke={accent}
+            borderStrokeWidth={1.5}
+            anchorFill={LIME}
+            anchorStroke={INK}
+            anchorCornerRadius={2}
           />
         </Layer>
       </Stage>

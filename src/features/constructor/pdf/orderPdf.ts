@@ -24,8 +24,8 @@ export interface OrderPdfData {
 /** A4 в пунктах PDF и ширина страницы в пикселях (~200 dpi). */
 const PAGE = { w: 595.28, h: 841.89 };
 const PX = 1654;
-const FONT = "system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif";
-const C = { text: '#16161a', muted: '#6b6b73', line: '#e4e4e7', accent: '#ff4f00', paper: '#f4f4f2' };
+const FONT = "Neue_machina, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif";
+const C = { text: '#000000', muted: '#6b6b6b', line: '#d9d9d9', accent: '#99ff00', paper: '#f3f4f3' };
 
 const rub = (n: number) => `${Math.round(n).toLocaleString('ru-RU')} ₽`;
 
@@ -81,8 +81,8 @@ async function renderPage(d: OrderPdfData): Promise<HTMLCanvasElement> {
   ctx.fillStyle = C.muted;
   ctx.fillText(d.createdAt.toLocaleString('ru-RU', { dateStyle: 'long', timeStyle: 'short' }), W - M, M + 58);
   ctx.textAlign = 'left';
-  ctx.fillStyle = C.line;
-  ctx.fillRect(M, M + 90, W - 2 * M, 2);
+  ctx.fillStyle = C.accent;
+  ctx.fillRect(M, M + 88, W - 2 * M, 6);
 
   // Превью: одна-две стороны — крупно, три-четыре — в ряд.
   const top = M + 130;
@@ -157,8 +157,11 @@ async function renderPage(d: OrderPdfData): Promise<HTMLCanvasElement> {
   ctx.fillStyle = C.muted;
   ctx.font = font(24);
   ctx.fillText('Примерная сумма', tx, y);
-  ctx.fillStyle = C.accent;
+  // Сумма на лаймовой плашке: лаймовый текст на белом не читается.
   ctx.font = font(50, 800);
+  ctx.fillStyle = C.accent;
+  ctx.fillRect(tx - 12, y + 14, ctx.measureText(rub(p.total)).width + 24, 66);
+  ctx.fillStyle = C.text;
   ctx.fillText(rub(p.total), tx, y + 62);
   ctx.fillStyle = C.muted;
   ctx.font = font(20);
