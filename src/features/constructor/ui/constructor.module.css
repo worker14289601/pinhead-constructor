@@ -99,6 +99,7 @@
 
 .breakdown { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
 .line { display: flex; justify-content: space-between; gap: 8px; }
+.hint { color: #1b7f3b; }
 
 .footer {
   margin-top: auto; position: sticky; bottom: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px;
@@ -115,6 +116,10 @@
 .modal { background: #fff; border-radius: 16px; padding: 24px; width: min(440px, 100%); max-height: calc(100dvh - 32px); overflow-y: auto; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box; }
 .modal h3 { margin: 0; }
 .modal .cta { width: 100%; }
+.modal .btn { width: 100%; }
+.check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--muted); cursor: pointer; }
+.check input { margin-top: 2px; flex: none; }
+.orderNumber { font-size: 26px; font-weight: 800; letter-spacing: .02em; margin: 0; user-select: all; }
 
 /* ─── Мобильная версия (приоритет): холст сверху, вкладки, панель, закреплённый итог ─── */
 @media (max-width: 900px) {

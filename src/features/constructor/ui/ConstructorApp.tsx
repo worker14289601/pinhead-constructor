@@ -3,6 +3,7 @@ import dynamic from 'next/dynamic';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchCatalog } from '../api/catalog';
 import { track } from '../analytics/events';
+import { getUtm } from '../analytics/utm';
 import { printAreaFor, sidesFor } from '../config/print-areas';
 import { FRAME } from '../config/garment-shapes';
 import { METHOD_INFO, WHITE_MIN_CHANNEL } from '../config/pricing';
@@ -40,7 +41,8 @@ const HistoryIcon = ({ redo }: { redo?: boolean }) => (
 type Tab = 'garment' | 'design' | 'order';
 const TABS: Array<[Tab, string]> = [['garment', 'Изделие'], ['design', 'Дизайн'], ['order', 'Размеры']];
 
-export function ConstructorApp() {
+/** ordersEndpoint — куда уходит заявка: POST {endpoint}/number выдаёт номер, POST {endpoint} принимает заявку. */
+export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpoint?: string }) {
   const st = useConstructor();
   const garment = useConstructor(selectGarment);
   const variant = useConstructor(selectVariant);
@@ -57,6 +59,7 @@ export function ConstructorApp() {
   useEffect(() => {
     const ac = new AbortController();
     track('constructor_open');
+    getUtm(); // запоминаем метки первого захода
     fetchCatalog(ac.signal).then(st.setCatalog).catch((e) => !ac.signal.aborted && setError(String(e.message ?? e)));
     return () => ac.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -309,6 +312,10 @@ export function ConstructorApp() {
               {price.sides.map((x) => (
                 <div key={x.side} className={s.line}><span>Печать: {SIDE_LABEL[x.side].toLowerCase()} · {x.format}{x.oversize ? ' (крупнее формата — уточнит менеджер)' : ''}</span><span>{x.price} ₽</span></div>
               ))}
+              {price.tierFrom > 1 && <div className={s.line}><span>Цена печати за тираж от {price.tierFrom} шт</span></div>}
+              {price.next && (
+                <div className={s.hint}>От {price.next.qty} шт дешевле — {price.next.perItem.toLocaleString('ru-RU')} ₽ за шт</div>
+              )}
             </div>
           )}
         </section>
@@ -328,7 +335,7 @@ export function ConstructorApp() {
       </aside>
 
       {orderOpen && garment && variant && price && (
-        <OrderForm garment={garment} variant={variant} price={price} stage={stageRef} onClose={() => setOrderOpen(false)} />
+        <OrderForm garment={garment} variant={variant} price={price} stage={stageRef} endpoint={ordersEndpoint} onClose={() => setOrderOpen(false)} />
       )}
     </div>
   );

@@ -107,9 +107,10 @@ export type PrintMethod = 'dtf' | 'dtg';
 export interface OrderContacts {
   name: string;
   phone: string;
-  email?: string;
-  telegram?: string;
-  delivery: 'pickup' | 'cdek';
-  city?: string;
+  email: string;
+  city: string;
+  address?: string;
   comment?: string;
+  /** Согласие на обработку персональных данных — без него заявка не отправляется. */
+  consent: boolean;
 }
