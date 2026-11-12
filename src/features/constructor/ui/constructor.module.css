@@ -20,18 +20,26 @@
   display: grid;
   grid-template-columns: 290px minmax(0, 1fr) 350px;
   grid-template-areas: 'left center right';
+  /* Единственная строка ровно во всю высоту: без minmax(0, 1fr) длинная панель растягивает ряд и страницу */
+  grid-template-rows: minmax(0, 1fr);
   gap: 12px;
   padding: 12px;
   box-sizing: border-box;
+  height: 100vh;
   height: 100dvh;
+  overflow: hidden;
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-body);
 }
+/* Десктоп: страница не прокручивается и не «резинится» (на мобильной вёрстке страница скроллится как раньше) */
+@media (min-width: 901px) {
+  :global(html):has(.app), :global(html):has(.app) :global(body) { overflow: hidden; overscroll-behavior: none; }
+}
 .app button { font: inherit; color: inherit; }
 .app *:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 
-.panel { background: #fff; overflow-y: auto; border: 1px solid var(--ink); border-radius: var(--r-card); }
+.panel { background: #fff; overflow-y: auto; overscroll-behavior: contain; min-height: 0; border: 1px solid var(--ink); border-radius: var(--r-card); }
 .left { grid-area: left; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
 .right { grid-area: right; display: flex; flex-direction: column; overflow-x: hidden; }
 .section { padding: 20px; display: flex; flex-direction: column; gap: 10px; }
@@ -45,47 +53,47 @@
 .h::before { content: '> '; }
 .muted { color: var(--muted); font-size: 13px; margin: 0; }
 .err { color: var(--danger); font-size: 13px; margin: 0; }
-.ok { font-size: 13px; margin: 0; }
-.ok::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: var(--lime); box-shadow: 0 0 0 1px var(--ink); }
 .warn { color: #6b4300; background: #fff1d6; border: 1px solid #e0a83a; border-radius: var(--r-ctl); padding: 8px 10px; font-size: 13px; margin: 0; }
 .stub { color: var(--muted); }
 
-/* Изделия */
-.garments { display: flex; flex-direction: column; gap: 6px; }
-.chip, .chipActive {
-  display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
-  padding: 11px 12px; border: 1px solid var(--ink); border-radius: 10px; background: #fff;
-  font-size: 14px; font-weight: 700; text-align: left; cursor: pointer;
-  transition: background-color .15s, color .15s;
-}
-.chip:hover { background: var(--paper); }
-.chip small, .chipActive small { color: var(--muted); white-space: nowrap; font-weight: 400; }
-.chipActive { background: var(--graphite); border-color: var(--graphite); color: #fff !important; }
-.chipActive small { color: var(--lime); }
-
-/* Цвет — плашка под изделием */
-.colorBar {
-  align-self: center; max-width: 100%; box-sizing: border-box; display: flex; align-items: center; gap: 12px;
-  padding: 8px 16px 8px 10px; background: #fff; border: 1px solid var(--ink); border-radius: 999px;
-}
-.colors { display: flex; gap: 10px; min-width: 0; overflow-x: auto; padding: 7px; margin: -7px; scrollbar-width: none; }
+.colors { display: flex; gap: 12px; min-width: 0; overflow-x: auto; padding: 6px; margin: -6px; scrollbar-width: none; }
 .colors::-webkit-scrollbar { display: none; }
-.colorName { font-size: 13px; font-weight: 800; text-transform: uppercase; white-space: nowrap; }
-.swatch, .swatchActive { flex: none; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--ink); cursor: pointer; padding: 0; }
-.swatchActive { box-shadow: 0 0 0 3px #fff, 0 0 0 6px var(--lime), 0 0 0 7px var(--ink); }
 
 /* Холст */
 .center { grid-area: center; display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 12px; gap: 8px; position: relative; }
-.history { position: absolute; left: 12px; top: 60px; z-index: 1; display: flex; gap: 6px; }
-.sides { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
-.iconBtn, .iconBtnDanger {
-  width: 36px; height: 36px; flex: none; display: grid; place-items: center; padding: 0;
-  border: 1px solid var(--ink); border-radius: var(--r-ctl); background: #fff; cursor: pointer; font-size: 17px; line-height: 1;
+/*
+ * Панель под холстом: история | цвет | масштаб. Все три группы — одинаковые сегменты: белые, чёрная рамка,
+ * радиус как у вкладок сторон, одна высота. Края равной ширины — цвет стоит ровно по центру.
+ */
+/* Центр может сжиматься: длинная палитра прокручивается, а не заезжает под масштаб */
+.toolbar { --seg-h: 40px; display: grid; grid-template-columns: minmax(max-content, 1fr) minmax(0, auto) minmax(max-content, 1fr); align-items: center; gap: 8px; min-width: 0; }
+.history, .zoom, .colorBar {
+  display: flex; align-items: stretch; height: var(--seg-h); box-sizing: border-box;
+  border: 1px solid var(--ink); border-radius: var(--r-ctl); background: #fff; overflow: hidden;
 }
-.iconBtn:not(:disabled):hover { background: var(--lime); }
-.iconBtn:disabled, .iconBtnDanger:disabled { opacity: .3; cursor: default; }
-.iconBtnDanger { color: var(--danger) !important; }
-.iconBtnDanger:not(:disabled):hover { background: var(--danger); border-color: var(--danger); color: #fff !important; }
+.history { justify-self: start; }
+.zoom { justify-self: end; }
+.history button, .zoom button {
+  min-width: var(--seg-h); padding: 0 8px; display: grid; place-items: center; border: 0; background: #fff;
+  color: var(--ink); font: inherit; font-size: 15px; font-weight: 800; line-height: 1; cursor: pointer;
+}
+.history button + button, .zoom button + button { border-left: 1px solid var(--ink); }
+.history button:not(:disabled):hover, .zoom button:not(:disabled):hover { background: var(--lime); }
+.history button:disabled, .zoom button:disabled { opacity: .35; cursor: default; }
+.zoomValue { min-width: 56px !important; font-size: 13px !important; font-variant-numeric: tabular-nums; }
+
+/* Цвет: та же рамка-сегмент, внутри — круглые образцы ткани */
+.colorBar { align-items: center; max-width: 100%; min-width: 0; padding: 0 10px; }
+.swatch, .swatchActive {
+  flex: none; width: 24px; height: 24px; border-radius: 50%; padding: 0; cursor: pointer;
+  /* тонкий внутренний контур — чтобы белый и светлые цвета не терялись на белом фоне */
+  border: 0; box-shadow: inset 0 0 0 1px rgba(0,0,0,.18);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.swatch:hover { transform: scale(1.1); }
+/* выбранный: кольцо цвета текста через белый зазор */
+.swatchActive { box-shadow: inset 0 0 0 1px rgba(0,0,0,.18), 0 0 0 2px #fff, 0 0 0 3.5px var(--ink); }
+.sides { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
 .tab, .tabActive {
   position: relative; padding: 8px 14px; white-space: nowrap; border-radius: var(--r-ctl); border: 1px solid var(--ink);
   background: #fff; cursor: pointer; font-size: 13px; font-weight: 800; text-transform: uppercase;
@@ -101,35 +109,20 @@
 .tabbar { display: none; }
 
 /* Кнопки — как «Сделать заказ» / «Проконсультироваться» на сайте */
-.tools { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.btn, .btnPrimary {
+
+.btn {
   padding: 12px 10px; border-radius: var(--r-ctl); border: 1px solid var(--ink); background: #fff;
   font-size: 13px; font-weight: 800; text-transform: uppercase; cursor: pointer;
 }
 .btn:hover { background: var(--paper); }
-.btnPrimary { background: var(--lime); }
-.btnPrimary:hover { background: #8aea00; }
-.btnSmall {
-  padding: 9px 6px; border-radius: var(--r-ctl); border: 1px solid var(--ink); background: #fff;
-  cursor: pointer; font-size: 13px; white-space: nowrap;
-}
-.btnSmall:hover { background: var(--lime); }
-.align { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 
 /* Слои */
 .layers { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.layer, .layerActive { display: flex; align-items: center; gap: 6px; padding: 4px; border: 1px solid var(--line); border-radius: 10px; }
-.layerActive { border-color: var(--ink); background: var(--lime-soft); box-shadow: inset 0 0 0 1px var(--ink); }
-.layerMain { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 2px; border: 0; background: none; cursor: pointer; text-align: left; }
 .thumb { width: 36px; height: 36px; flex: none; border-radius: var(--r-ctl); border: 1px solid var(--ink); display: grid; place-items: center; overflow: hidden; font-weight: 800; font-size: 14px; }
 .thumb img { max-width: 100%; max-height: 100%; object-fit: contain; }
-.layerName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
-.layerActions { display: flex; gap: 4px; }
-.layerActions .iconBtn, .layerActions .iconBtnDanger { width: 32px; height: 32px; font-size: 15px; }
 
 /* Поля */
-.props { display: flex; flex-direction: column; gap: 8px; }
-.row { display: flex; gap: 8px; align-items: center; }
+
 .input {
   width: 100%; padding: 11px 12px; border: 1px solid var(--ink); border-radius: var(--r-ctl);
   font: inherit; font-size: 16px; box-sizing: border-box; background: #fff;
@@ -137,25 +130,8 @@
 .input::placeholder { color: #8a8a8a; }
 .input:focus { outline: none; box-shadow: 0 0 0 3px var(--lime); }
 .color { width: 44px; height: 44px; padding: 2px; border: 1px solid var(--ink); border-radius: var(--r-ctl); background: #fff; flex: none; }
-.radio { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; cursor: pointer; padding: 10px; border: 1px solid var(--line); border-radius: 10px; }
-.radio:has(input:checked) { border-color: var(--ink); background: var(--lime-soft); }
-.radio input { accent-color: var(--ink); margin-top: 3px; }
-.radio b { text-transform: uppercase; font-weight: 800; }
-.radio small { color: var(--muted); }
 
 /* Размеры */
-.sizes { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
-.size, .sizeActive { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; font-weight: 800; }
-.sizeActive { border-color: var(--ink); background: var(--lime); }
-.stepper { display: grid; grid-template-columns: 28px 1fr 28px; align-items: center; gap: 2px; }
-.stepper button { height: 28px; border: 1px solid var(--ink); border-radius: var(--r-ctl); background: #fff; cursor: pointer; font-size: 16px; line-height: 1; }
-.stepper button:disabled { opacity: .3; cursor: default; }
-.stepper input { width: 100%; min-width: 0; text-align: center; border: 0; background: transparent; font: inherit; font-size: 16px; -moz-appearance: textfield; }
-.stepper input::-webkit-outer-spin-button, .stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-
-.breakdown { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
-.line { display: flex; justify-content: space-between; gap: 8px; }
-.hint { align-self: flex-start; margin-top: 4px; padding: 4px 8px; border-radius: var(--r-ctl); background: var(--lime); color: var(--ink); font-weight: 700; }
 
 /* Итог — графитовая плашка, как тёмные карточки сайта */
 .footer {
@@ -166,7 +142,6 @@
 .footer > div { flex: 1 1 auto; min-width: 0; }
 .footer .cta { flex: 1 0 auto; }
 .footer .muted { color: rgb(255 255 255 / .65); }
-.total { font-family: var(--font-head); font-size: 20px; font-weight: 700; color: var(--lime); white-space: nowrap; }
 .cta {
   padding: 14px 18px; border: 0; border-radius: var(--r-ctl); background: var(--lime); color: var(--ink) !important;
   font-size: 14px; font-weight: 800; text-transform: uppercase; cursor: pointer; white-space: nowrap;
@@ -198,9 +173,7 @@
   .left, .section { padding: 16px; }
   .sides { gap: 4px; }
   .tab, .tabActive { padding: 7px 9px; font-size: 12px; }
-  .history { top: 56px; }
   .footer { padding: 14px 16px; }
-  .total { font-size: 17px; }
   .cta { padding: 13px 14px; font-size: 13px; }
 }
 
@@ -211,11 +184,10 @@
     grid-template-rows: auto auto auto 1fr;
     grid-template-areas: 'center' 'tabbar' 'panel' 'footer';
     gap: 0; padding: 0;
-    height: auto; min-height: 100dvh;
+    height: auto; min-height: 100vh; min-height: 100dvh; overflow: visible;
   }
   /* Выше, чем было: под изделием теперь плашка цвета. */
   .center { height: 54dvh; padding: 8px; }
-  .history { left: 8px; top: 56px; }
   .sides { gap: 4px; }
   .tab, .tabActive { padding: 8px 10px; font-size: 12px; }
   .tabbar {
@@ -239,13 +211,14 @@
   /* Сворачивание слоёв — только на десктопе */
   .layers[hidden] { display: flex; }
 
-  .garments { flex-direction: row; overflow-x: auto; padding-bottom: 4px; scroll-snap-type: x mandatory; }
-  .chip, .chipActive { flex: none; flex-direction: column; align-items: flex-start; width: 150px; scroll-snap-align: start; }
-
   .footer { grid-area: footer; align-self: end; position: sticky; bottom: 0; z-index: 3; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); flex-wrap: nowrap; }
   .footer .cta { flex: none; }
-  .colorBar { padding: 6px 12px 6px 8px; gap: 10px; }
-  .swatch, .swatchActive { width: 32px; height: 32px; }
+  /* Узкий экран: сегменты ниже, у масштаба без процентов — только «−/+». */
+  .toolbar { --seg-h: 36px; gap: 6px; }
+  .history button, .zoom button { padding: 0 6px; }
+  .colorBar { padding: 0 8px; }
+  .swatch, .swatchActive { width: 22px; height: 22px; }
+  .zoom .zoomValue { display: none; }
 }
 
 /* Таблица размеров */
@@ -255,67 +228,71 @@
 .chart tbody th { text-align: left; font-weight: 800; }
 .linkBtn { align-self: flex-start; padding: 0; border: 0; background: none; cursor: pointer; font-size: 13px; font-weight: 700; text-decoration: underline; }
 
-/* Каталог: типы изделий */
-.types { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
-/* Неполный последний ряд: последняя ячейка тянется на оставшуюся ширину, дыры нет */
-.types > :last-child:nth-child(odd) { grid-column: 1 / -1; }
-@media (max-width: 900px) {
-  .types { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .types > :last-child:nth-child(odd) { grid-column: auto; }
-  .types > :last-child:nth-child(3n + 1) { grid-column: 1 / -1; }
-  .types > :last-child:nth-child(3n + 2) { grid-column: span 2; }
-}
+/*
+ * Каталог (левая колонка): типы — список в общей рамке, модели — радио-строки как «Нанесение»,
+ * под ними карточка модели на сером: описание, размеры, таблица обмеров.
+ */
+.types { display: flex; flex-direction: column; border: 1px solid var(--ink); border-radius: 12px; overflow: hidden; flex: none; }
 .type, .typeActive {
-  display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 4px 8px;
-  border: 1px solid var(--ink); border-radius: 10px; background: #fff; cursor: pointer; text-align: center;
-  font-size: 12px; font-weight: 800; transition: background-color .15s;
+  display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 12px;
+  padding: 6px 12px 6px 6px; border: 0; background: #fff; text-align: left; cursor: pointer;
+  font-size: 14px; font-weight: 700; transition: background-color .15s;
 }
+.type + .type, .type + .typeActive, .typeActive + .type { border-top: 1px solid var(--line); }
+.typeIcon { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 8px; background: var(--paper); transition: background-color .15s; }
+.typeText { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.typeName, .modelName { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.type small, .typeActive small { font-size: 12px; font-weight: 400; color: var(--muted); white-space: nowrap; }
 .type:hover { background: var(--paper); }
-.type small, .typeActive small { font-weight: 400; color: var(--muted); font-size: 11px; }
-.typeActive { background: var(--graphite); border-color: var(--graphite); color: #fff !important; }
+.type:hover .typeIcon { background: #fff; }
+.typeActive { background: var(--graphite); color: #fff !important; }
+.typeActive .typeIcon { background: var(--lime); color: var(--ink); }
 .typeActive small { color: var(--lime); }
 
-.btnSmallPrimary { padding: 9px 6px; border-radius: var(--r-ctl); border: 1px solid var(--ink); background: var(--lime); cursor: pointer; font-size: 13px; font-weight: 800; }
-.btnSmallPrimary:hover { background: #8aea00; }
-.propsHead { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; font-weight: 800; text-transform: uppercase; }
-.layersHead { display: flex; justify-content: space-between; align-items: baseline; }
-.layersHead .h { margin: 0; }
+.models { display: flex; flex-direction: column; gap: 6px; flex: none; }
+.model, .modelActive {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #fff;
+  text-align: left; cursor: pointer; font-size: 14px; font-weight: 700; transition: border-color .15s, background-color .15s;
+}
+.model::before, .modelActive::before {
+  content: ''; width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; border: 1px solid var(--ink); background: #fff;
+}
+.modelActive::before { border-width: 4px; }
+.model:hover { border-color: var(--ink); }
+.modelActive { border-color: var(--ink); background: var(--lime-soft); }
+:is(.model, .modelActive) .typeText { flex-direction: row; flex-wrap: wrap; justify-content: space-between; align-items: baseline; column-gap: 8px; }
+.model small, .modelActive small { font-size: 12px; font-weight: 400; color: var(--muted); white-space: nowrap; }
+.modelActive small { color: var(--ink); font-weight: 700; }
+
+.about { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; padding: 14px; border-radius: 12px; background: var(--paper); flex: none; }
+.aboutText, .aboutTextOpen { margin: 0; font-size: 13px; line-height: 1.45; }
+.aboutText { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.about .linkBtn { margin-top: -6px; font-size: 12px; }
+.aboutSizes { display: flex; flex-direction: column; gap: 6px; }
+.aboutLabel { font-size: 11px; font-weight: 800; text-transform: uppercase; color: var(--muted); letter-spacing: .02em; }
+.sizeChips { display: flex; flex-wrap: wrap; gap: 4px; }
+.sizeChip { padding: 4px 8px; min-width: 18px; text-align: center; border: 1px solid var(--line); border-radius: var(--r-ctl); background: #fff; font-size: 12px; font-weight: 700; }
+
+/* Телефон: типы и модели — горизонтальные ленты, чтобы панель под холстом не уходила на три экрана */
+@media (max-width: 900px) {
+  .types { flex-direction: row; overflow-x: auto; border: 0; border-radius: 0; gap: 6px; scrollbar-width: none; margin: 0 -16px; padding: 0 16px; }
+  .types::-webkit-scrollbar { display: none; }
+  .type, .typeActive {
+    flex: none; width: 96px; grid-template-columns: 1fr; justify-items: center; gap: 4px; padding: 8px 4px;
+    border: 1px solid var(--ink); border-radius: 10px; text-align: center; font-size: 13px;
+  }
+  .type + .type, .type + .typeActive, .typeActive + .type { border-top: 1px solid var(--ink); }
+  .typeActive { border-color: var(--graphite); }
+  .models { flex-direction: row; flex-wrap: wrap; }
+  .model, .modelActive { flex: 1 1 auto; }
+}
 .layers[hidden] { display: none; }
 @media (max-width: 900px) { .desktopOnly { display: none; } }
 
 /* Текст */
-.sub { margin: 6px 0 2px; font-size: 12px; font-weight: 800; text-transform: uppercase; }
-.fontGroup { margin: 6px 0 2px; font-size: 11px; color: var(--muted); }
-.fonts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
-.fontCard, .fontCardActive {
-  display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 8px 10px; text-align: left;
-  border: 1px solid var(--line); border-radius: 10px; background: #fff; cursor: pointer;
-}
-.fontCard:hover { border-color: var(--ink); }
-.fontCardActive { border-color: var(--ink); background: var(--lime-soft); box-shadow: inset 0 0 0 1px var(--ink); }
+
 /* Превью: широкие шрифты переносятся (до 2 строк), без многоточия на коротком тексте */
-.fontCard span, .fontCardActive span {
-  font-size: 18px; line-height: 1.25; overflow-wrap: anywhere; overflow: hidden;
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
-}
-.fontCard small, .fontCardActive small { font-size: 11px; color: var(--muted); }
-.styleRow { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.toggle, .toggleOn {
-  width: 36px; height: 36px; display: grid; place-items: center; padding: 0; cursor: pointer;
-  border: 1px solid var(--ink); border-radius: var(--r-ctl); background: #fff; font-size: 16px;
-}
-.toggle:hover { background: var(--lime-soft); }
-.toggleOn { background: var(--lime); }
-.toggle:disabled { opacity: .3; cursor: default; }
-.sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
-.palette { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.dotBtn, .dotActive { width: 28px; height: 28px; padding: 0; border-radius: 50%; border: 1px solid var(--ink); cursor: pointer; }
-.dotActive { box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--ink); }
-.colorMini { width: 32px; height: 32px; padding: 1px; flex: none; border: 1px solid var(--ink); border-radius: 50%; background: #fff; cursor: pointer; }
-.slider { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
-.slider span { display: flex; justify-content: space-between; }
-.slider input { width: 100%; accent-color: var(--ink); }
-.grow { flex: 1; min-width: 0; }
 
 /* Короткое сообщение внизу экрана */
 .notice {

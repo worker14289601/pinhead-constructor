@@ -102,3 +102,18 @@ export function isLight(hex: string) {
   const [r, g, b] = hexToRgb(hex);
   return 0.299 * r + 0.587 * g + 0.114 * b > 150;
 }
+
+/**
+ * Тон подсветки пустой зоны по цвету ткани:
+ * light — светлые ткани, dark — тёмные и приглушённые, vivid — насыщенные средние (бордовый, фуксия, красный):
+ * салатовый поверх них смешивается в коричневый, поэтому для них подсветка белая.
+ */
+export type ZoneTone = 'light' | 'dark' | 'vivid';
+export function zoneTone(hex: string): ZoneTone {
+  const [r, g, b] = hexToRgb(hex);
+  const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+  if (lum > 150) return 'light';
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const sat = max === 0 ? 0 : (max - min) / max;
+  return sat > 0.45 && lum > 50 ? 'vivid' : 'dark';
+}

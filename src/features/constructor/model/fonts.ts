@@ -1,4 +1,5 @@
-import { fontCssUrl, fontDef } from '../config/fonts';
+import { fontDef } from '../config/fonts';
+import { FONT_BASE_URL, FONT_FILES } from '../config/font-files';
 import { clearTextCache } from './trim';
 
 /**
@@ -6,7 +7,6 @@ import { clearTextCache } from './trim';
  * текст рисуется запасным, и габарит (цена, формат) считается по нему. Поэтому шрифт грузим через FontFace API,
  * после загрузки сбрасываем кэш измерений и просим интерфейс перерисоваться (см. onFontLoaded).
  */
-const sheets = new Map<string, Promise<void>>();
 const ready = new Set<string>();
 const listeners = new Set<() => void>();
 
@@ -20,40 +20,23 @@ export function onFontLoaded(fn: () => void) {
 export const fontSpec = (family: string, bold: boolean, italic: boolean, px = 32) =>
   `${italic ? 'italic' : 'normal'} ${bold ? 700 : 400} ${px}px "${family}"`;
 
-/** Скачивает CSS семейства и регистрирует его начертания как FontFace (подгружаются по unicode-range). */
-function registerFamily(family: string): Promise<void> {
-  const def = fontDef(family);
-  if (!def) return Promise.resolve();
-  let p = sheets.get(family);
-  if (!p) {
-    p = fetch(fontCssUrl(def))
-      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`fonts_${r.status}`))))
-      .then((css) => {
-        for (const m of css.matchAll(/@font-face\s*{([^}]*)}/g)) {
-          const get = (prop: string) => new RegExp(`${prop}:\\s*([^;]+);`).exec(m[1])?.[1].trim();
-          const url = /url\(([^)]+)\)/.exec(m[1])?.[1];
-          if (!url) continue;
-          const face = new FontFace(family, `url(${url})`, {
-            style: get('font-style') ?? 'normal',
-            weight: get('font-weight') ?? '400',
-            unicodeRange: get('unicode-range'),
-          });
-          document.fonts.add(face);
-        }
-        ready.add(family);
-      })
-      .catch((e) => { sheets.delete(family); throw e; });
-    sheets.set(family, p);
+/** Регистрирует начертания семейства как FontFace из локальных файлов (подгружаются по unicode-range). */
+function registerFamily(family: string) {
+  if (ready.has(family) || !fontDef(family)) return;
+  for (const f of FONT_FILES) {
+    if (f.family !== family) continue;
+    document.fonts.add(new FontFace(family, `url(${FONT_BASE_URL}${f.file}) format('woff2')`, {
+      style: f.style, weight: f.weight, unicodeRange: f.unicodeRange,
+    }));
   }
-  return p;
+  ready.add(family);
 }
 
 /** Дожидается шрифта для заданного текста. Системные шрифты (не из списка) готовы сразу. */
 export async function ensureFont(family: string, bold: boolean, italic: boolean, text: string): Promise<void> {
   if (!fontDef(family) || typeof document === 'undefined') return;
-  const was = ready.has(family) && document.fonts.check(fontSpec(family, bold, italic), text || 'Аа');
-  if (was) return;
-  await registerFamily(family);
+  if (ready.has(family) && document.fonts.check(fontSpec(family, bold, italic), text || 'Аа')) return;
+  registerFamily(family);
   await document.fonts.load(fontSpec(family, bold, italic), text || 'Аа');
   clearTextCache();
   listeners.forEach((fn) => fn());

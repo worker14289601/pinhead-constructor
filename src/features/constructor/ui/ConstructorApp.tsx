@@ -6,7 +6,7 @@ import { track } from '../analytics/events';
 import { getUtm } from '../analytics/utm';
 import { printAreaFor, sidesFor } from '../config/print-areas';
 import { FRAME } from '../config/garment-shapes';
-import { METHOD_INFO, WHITE_MIN_CHANNEL } from '../config/pricing';
+import { WHITE_MIN_CHANNEL } from '../config/pricing';
 import { hexToRgb, isLight } from '../canvas/tint';
 import { designBounds } from '../model/bounds';
 import { clearDraft, hasContent, loadDraft, saveDraft, type Draft } from '../model/draft';
@@ -15,13 +15,15 @@ import { calcPrice } from '../model/pricing';
 import { validateFile, ACCEPTED_TYPES } from '../model/quality';
 import { canRedo, canUndo, selectGarment, selectVariant, useConstructor } from '../model/store';
 import { contentBox } from '../model/trim';
-import { SIDE_LABEL, SIDE_TAB, type PrintMethod } from '../model/types';
+import { SIDE_LABEL, SIDE_TAB } from '../model/types';
 import type { DesignStageHandle } from '../canvas/DesignStage';
+import { MAX_USER_ZOOM, ZOOM_STEP } from '../canvas/zoom';
 import { GarmentPicker } from './GarmentPicker';
 import { DesignPanel } from './DesignPanel';
 import { DraftPrompt } from './DraftPrompt';
 import { LayersPanel } from './LayersPanel';
 import { OrderForm } from './OrderForm';
+import { OrderFooter, OrderPanel } from './OrderPanel';
 import { SizeChart } from './SizeChart';
 import s from './constructor.module.css';
 
@@ -51,6 +53,8 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
   const variant = useConstructor(selectVariant);
   const stageRef = useRef<DesignStageHandle>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Масштаб холста — кнопки в панели под холстом; DesignStage сбрасывает его при смене стороны и модели.
+  const [zoom, setZoom] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [orderOpen, setOrderOpen] = useState(false);
@@ -177,7 +181,6 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
   const selected = st.layers.find((l) => l.id === st.selectedLayerId);
 
   const hasDesign = st.layers.some((l) => sides.includes(l.side));
-  const canOrder = !!price?.qty && hasDesign;
   const openOrder = () => {
     if (!hasDesign) return setTab('design');
     if (!price?.qty) return setTab('order');
@@ -192,16 +195,14 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
         <h3 className={s.h}>Изделие</h3>
         {error && <p className={s.err}>{error}</p>}
         {!st.garments.length && !error && <p className={s.muted}>Загружаем каталог…</p>}
-        <GarmentPicker garments={st.garments} garmentId={st.garmentId} onSelect={st.selectGarment} />
+        <GarmentPicker
+          garments={st.garments} garmentId={st.garmentId} variant={variant}
+          onSelect={st.selectGarment}
+        />
       </section>
 
       {/* Холст */}
       <main className={s.center}>
-        {/* Отмена/повтор — в углу холста: строка вкладок занята четырьмя сторонами. */}
-        <div className={s.history}>
-          <button className={s.iconBtn} onClick={st.undo} disabled={!undoable} aria-label="Отменить" title="Отменить (Ctrl+Z)"><HistoryIcon /></button>
-          <button className={s.iconBtn} onClick={st.redo} disabled={!redoable} aria-label="Повторить" title="Повторить (Ctrl+Shift+Z)"><HistoryIcon redo /></button>
-        </div>
         <div className={s.sides}>
           {sides.map((side) => (
             <button
@@ -223,30 +224,42 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
         >
           <DesignStage
             apiRef={stageRef}
-            empty={{ onUpload: () => fileRef.current?.click(), onText: addText }}
+            empty={{ onUpload: () => fileRef.current?.click(), dragging: dragOver }}
+            zoom={zoom}
+            onZoom={setZoom}
           />
           {dragOver && <div className={s.dropHint}>Отпустите файл, чтобы добавить</div>}
         </div>
-        {/* Цвет — под изделием: меняется в один клик с любого экрана, без прокрутки панелей. */}
-        {garment && garment.variants.length > 0 && (
-          <div className={s.colorBar} role="radiogroup" aria-label="Цвет изделия">
-            <div className={s.colors}>
-              {garment.variants.map((v) => (
-                <button
-                  key={v.productId}
-                  role="radio"
-                  aria-checked={v.productId === st.variantId}
-                  className={v.productId === st.variantId ? s.swatchActive : s.swatch}
-                  style={{ background: v.hex }}
-                  title={v.colorName}
-                  aria-label={v.colorName}
-                  onClick={() => { st.selectVariant(v.productId); track('color_select', { color: v.colorName }); }}
-                />
-              ))}
-            </div>
-            <span className={s.colorName}>{variant?.colorName}</span>
+        {/* Панель под холстом: история слева, цвет по центру, масштаб справа — ничего не лежит поверх графики. */}
+        <div className={s.toolbar}>
+          <div className={s.history} role="group" aria-label="История">
+            <button type="button" onClick={st.undo} disabled={!undoable} aria-label="Отменить" title="Отменить (Ctrl+Z)"><HistoryIcon /></button>
+            <button type="button" onClick={st.redo} disabled={!redoable} aria-label="Повторить" title="Повторить (Ctrl+Shift+Z)"><HistoryIcon redo /></button>
           </div>
-        )}
+          {garment && garment.variants.length > 0 && (
+            <div className={s.colorBar} role="radiogroup" aria-label="Цвет изделия">
+              <div className={s.colors}>
+                {garment.variants.map((v) => (
+                  <button
+                    key={v.productId}
+                    role="radio"
+                    aria-checked={v.productId === st.variantId}
+                    className={v.productId === st.variantId ? s.swatchActive : s.swatch}
+                    style={{ background: v.hex }}
+                    title={v.colorName}
+                    aria-label={v.colorName}
+                    onClick={() => { st.selectVariant(v.productId); track('color_select', { color: v.colorName }); }}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+          <div className={s.zoom} role="group" aria-label="Масштаб">
+            <button type="button" onClick={() => setZoom((z) => Math.max(1, z / ZOOM_STEP))} disabled={zoom <= 1} aria-label="Уменьшить" title="Уменьшить">−</button>
+            <button type="button" className={s.zoomValue} onClick={() => setZoom(1)} disabled={zoom === 1} aria-label="Сбросить масштаб" title="Сбросить масштаб">{Math.round(zoom * 100)}%</button>
+            <button type="button" onClick={() => setZoom((z) => Math.min(MAX_USER_ZOOM, z * ZOOM_STEP))} disabled={zoom >= MAX_USER_ZOOM} aria-label="Увеличить" title="Увеличить">+</button>
+          </div>
+        </div>
       </main>
 
       {/* Вкладки — только на мобильном */}
@@ -275,60 +288,11 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
 
         {/* Размеры */}
         <section className={s.section} data-section="order">
-          <h3 className={s.h}>Нанесение</h3>
-          {(Object.keys(METHOD_INFO) as PrintMethod[]).map((m) => (
-            <label key={m} className={s.radio}>
-              <input type="radio" checked={st.method === m} onChange={() => st.setMethod(m)} />
-              <span><b>{METHOD_INFO[m].title}</b><br /><small>{METHOD_INFO[m].hint}</small></span>
-            </label>
-          ))}
-
-          <h3 className={s.h}>Размеры и количество</h3>
-          <div className={s.sizes}>
-            {variant?.sizes.map((size) => {
-              const q = st.sizes[size] ?? 0;
-              return (
-                <div key={size} className={q ? s.sizeActive : s.size}>
-                  <span>{size}</span>
-                  <div className={s.stepper}>
-                    <button aria-label={`Меньше ${size}`} onClick={() => st.incSize(size, -1)} disabled={!q}>−</button>
-                    <input
-                      type="number" min={0} inputMode="numeric" value={q} aria-label={`Количество ${size}`}
-                      onChange={(e) => { st.setSizeQty(size, Number(e.target.value) || 0); track('size_set'); }}
-                    />
-                    <button aria-label={`Больше ${size}`} onClick={() => { st.incSize(size, 1); track('size_set'); }}>+</button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <button className={s.linkBtn} onClick={() => setChartOpen(true)}>Таблица размеров</button>
-          {price && price.sides.length > 0 && (
-            <div className={s.breakdown}>
-              <div className={s.line}><span>Изделие</span><span>{price.garment} ₽</span></div>
-              {price.sides.map((x) => (
-                <div key={x.side} className={s.line}><span>Печать: {SIDE_LABEL[x.side].toLowerCase()} · {x.format}{x.oversize ? ' (крупнее формата — уточнит менеджер)' : ''}</span><span>{x.price} ₽</span></div>
-              ))}
-              {price.tierFrom > 1 && <div className={s.line}><span>Цена печати за тираж от {price.tierFrom} шт</span></div>}
-              {price.next && (
-                <div className={s.hint}>От {price.next.qty} шт дешевле — {price.next.perItem.toLocaleString('ru-RU')} ₽ за шт</div>
-              )}
-            </div>
-          )}
+          <OrderPanel variant={variant} price={price} onSizeChart={() => setChartOpen(true)} />
         </section>
 
         {/* Итог — на мобильном закреплён внизу */}
-        <footer className={s.footer}>
-          <div>
-            <div className={s.total}>
-              {price ? (price.qty ? `${price.total.toLocaleString('ru-RU')} ₽` : `${price.perItem.toLocaleString('ru-RU')} ₽ / шт`) : '—'}
-            </div>
-            <div className={s.muted}>{price?.qty ? `${price.qty} шт · ${price.perItem} ₽ за шт` : 'Цена примерная, уточнит менеджер'}</div>
-          </div>
-          <button className={s.cta} onClick={openOrder} aria-disabled={!canOrder}>
-            {!hasDesign ? 'Добавить дизайн' : !price?.qty ? 'Выбрать размеры' : 'Оформить заявку'}
-          </button>
-        </footer>
+        <OrderFooter price={price} hasDesign={hasDesign} onOrder={openOrder} />
       </aside>
 
       {draftGate === 'ask' && draft && (

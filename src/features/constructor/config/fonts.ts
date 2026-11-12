@@ -1,5 +1,5 @@
 /**
- * Шрифты для текста. Все с кириллицей, грузятся с Google Fonts по требованию (model/fonts.ts).
+ * Шрифты для текста. Все с кириллицей; файлы лежат в проекте (config/font-files.ts), грузятся по требованию (model/fonts.ts).
  * bold / italic — есть ли у семейства настоящее начертание; без него кнопка в панели неактивна
  * (подделанное браузером начертание в файле печати выглядит иначе, чем задумано).
  */
@@ -10,8 +10,6 @@ export interface FontDef {
   group: FontGroup;
   bold: boolean;
   italic: boolean;
-  /** Часть адреса Google Fonts после `family=`; null — собираем из флагов. */
-  query?: string;
 }
 
 export const FONT_GROUPS: Array<[FontGroup, string]> = [
@@ -36,16 +34,6 @@ export const FONTS: FontDef[] = [
 export const DEFAULT_FONT = 'Montserrat';
 
 export const fontDef = (family: string) => FONTS.find((f) => f.family === family);
-
-/** Запрос к Google Fonts CSS API v2 для семейства. */
-export function fontCssUrl(f: FontDef): string {
-  const name = f.family.replace(/ /g, '+');
-  const weights = f.bold ? [400, 700] : [400];
-  let spec = '';
-  if (f.italic) spec = `:ital,wght@${weights.map((w) => `0,${w}`).concat(weights.map((w) => `1,${w}`)).join(';')}`;
-  else if (f.bold) spec = `:wght@${weights.join(';')}`;
-  return `https://fonts.googleapis.com/css2?family=${name}${spec}&display=swap`;
-}
 
 /** Цвета текста — быстрый выбор; свой цвет задаётся отдельным полем. */
 export const TEXT_COLORS = [

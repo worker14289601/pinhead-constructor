@@ -33,6 +33,7 @@ export interface ApiProduct {
   editor_front_view: string;
   editor_back_view: string;
   sizes: Array<{ name: string; qty: number }>;
+  description?: string;
   order?: number;
 }
 
@@ -43,6 +44,8 @@ export interface GarmentVariant {
   hex: string;
   price: number;
   sizes: string[];
+  /** Описание из каталога: крой, состав, плотность. У цветов одной модели бывает разным. */
+  description: string;
   /** Плоские мокапы для редактора; пусто — рисуем векторный силуэт. */
   mockups: Partial<Record<Side, string>>;
 }
@@ -66,6 +69,11 @@ export interface PrintArea {
   height: number;
   /** Реальная ширина зоны в сантиметрах — нужна для расчёта DPI и формата (A4/A3...). */
   widthCm: number;
+  /**
+   * Контур непрямоугольной зоны: замкнутый многоугольник в долях собственного бокса зоны (0..1, пары [x, y],
+   * по часовой стрелке, последняя точка не дублирует первую). Нет контура — зона прямоугольная.
+   */
+  outline?: Array<[number, number]>;
 }
 
 interface LayerBase {

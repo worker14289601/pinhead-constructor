@@ -31,13 +31,14 @@ export const PRINT_AREAS: Record<GarmentType, Record<FlatSide, PrintArea>> = {
   },
 };
 
-/** Стороны, доступные модели: рукав — только у изделий с мокапом (у шоппера и кепки его нет). */
+/** Стороны, доступные модели: рукава — только у мокапов с размеченными рукавами (у шоппера и кепки их нет). */
 export function sidesFor(garment: Garment | null): Side[] {
-  return garment?.shapeId ? SIDES : SIDES.filter((s) => !isSleeve(s));
+  return garment?.shapeId && SHAPES[garment.shapeId].areas.sleeve_left ? SIDES : SIDES.filter((s) => !isSleeve(s));
 }
 
 /** Зона печати модели: с мокапа, если он есть, иначе — общая по типу изделия. */
 export function printAreaFor(garment: Garment, side: Side): PrintArea {
-  if (garment.shapeId) return SHAPES[garment.shapeId].areas[side];
+  const own = garment.shapeId ? SHAPES[garment.shapeId].areas[side] : undefined;
+  if (own) return own;
   return PRINT_AREAS[garment.type][isSleeve(side) ? 'front' : (side as FlatSide)];
 }

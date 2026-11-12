@@ -25,6 +25,9 @@ const COLOR_OVERRIDE: Record<string, string> = {
   черный: '#1c1c1c',
 };
 
+/** Чистит описание из API: двойные пробелы, «bag.35x40» без пробела после точки. */
+const tidy = (s = '') => s.replace(/([a-zа-яё])\.(?=[A-ZА-ЯЁ0-9])/gi, '$1. ').replace(/\s+/g, ' ').trim();
+
 function toVariant(p: ApiProduct): GarmentVariant {
   const name = p.color.toLowerCase().replace('ё', 'е');
   const hex = COLOR_OVERRIDE[name] || p.stageColor || COLOR_FALLBACK[name] || '#d9d9d9';
@@ -36,6 +39,7 @@ function toVariant(p: ApiProduct): GarmentVariant {
     hex,
     price: p.price,
     sizes: sortSizes(p.sizes.map((s) => s.name)),
+    description: tidy(p.description),
     mockups: { front: abs(p.editor_front_view), back: abs(p.editor_back_view) },
   };
 }

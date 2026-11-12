@@ -5,8 +5,10 @@ import { printAreaFor } from '../config/print-areas';
 import { imageDpi, MIN_DPI } from '../model/quality';
 import { selectGarment, useConstructor } from '../model/store';
 import { SIDE_LABEL } from '../model/types';
+import { Icon, type IconName } from './icons';
 import { TextPanel } from './TextPanel';
 import s from './constructor.module.css';
+import d from './design.module.css';
 
 interface Props {
   stage: RefObject<DesignStageHandle>;
@@ -17,7 +19,7 @@ interface Props {
 
 /**
  * Правая панель «Дизайн» зависит от выбора на холсте:
- * ничего не выбрано — крупные кнопки добавления; текст — настройки текста; картинка — её параметры.
+ * ничего не выбрано — крупные карточки добавления; текст — настройки текста; картинка — её параметры.
  */
 export function DesignPanel({ stage, fileError, onUpload, onAddText }: Props) {
   const side = useConstructor((st) => st.side);
@@ -29,55 +31,79 @@ export function DesignPanel({ stage, fileError, onUpload, onAddText }: Props) {
     ? imageDpi(selected, printAreaFor(garment, selected.side).widthCm, selected.isVector)
     : null;
 
+  // Действия со слоем: одна сегментная панель иконок
+  const actions: Array<{ icon: IconName; label: string; run: () => void; pressed?: boolean }> = selected ? [
+    { icon: 'alignCenterX', label: 'По центру по горизонтали', run: () => stage.current?.align(selected.id, 'centerX') },
+    { icon: 'alignCenterY', label: 'По центру по вертикали', run: () => stage.current?.align(selected.id, 'centerY') },
+    { icon: 'fit', label: 'Вписать: максимальный размер в зоне печати', run: () => stage.current?.align(selected.id, 'fit') },
+    { icon: 'flip', label: 'Отразить по горизонтали', run: () => updateLayer(selected.id, { flipX: !selected.flipX }), pressed: !!selected.flipX },
+  ] : [];
+
   return (
     <>
       <h3 className={s.h}>Дизайн · {SIDE_LABEL[side]}</h3>
-      <div className={s.tools}>
-        <button className={selected ? s.btnSmallPrimary : s.btnPrimary} onClick={onUpload}>
-          {selected ? '+ Картинка' : 'Загрузить картинку'}
-        </button>
-        <button className={selected ? s.btnSmall : s.btn} onClick={onAddText}>
-          {selected ? '+ Текст' : 'Добавить текст'}
-        </button>
-      </div>
-      {!selected && <p className={s.muted}>PNG, JPG, WEBP или SVG до 15 МБ. Лучше — PNG с прозрачным фоном. Файл можно перетащить прямо на изделие.</p>}
+
+      {!selected ? (
+        <>
+          <div className={d.actions}>
+            <button className={d.cardPrimary} onClick={onUpload}>
+              <Icon name="upload" size={24} />
+              <span className={d.cardTitle}>Загрузить картинку</span>
+              <span className={d.cardNote}>PNG, JPG, SVG · до 15 МБ</span>
+            </button>
+            <button className={d.card} onClick={onAddText}>
+              <Icon name="textFont" size={24} />
+              <span className={d.cardTitle}>Добавить текст</span>
+            </button>
+          </div>
+          <p className={s.muted}>Лучше PNG с прозрачным фоном. Файл можно перетащить на изделие.</p>
+        </>
+      ) : (
+        <div className={d.addRow}>
+          <button className={d.addBtn} onClick={onUpload}><Icon name="plus" size={18} />Картинка</button>
+          <button className={d.addBtn} onClick={onAddText}><Icon name="plus" size={18} />Текст</button>
+        </div>
+      )}
       {fileError && <p className={s.err}>{fileError}</p>}
 
       {selected && (
-        <div className={s.props}>
-          <div className={s.propsHead}>
-            <span>{selected.kind === 'text' ? 'Текст' : 'Картинка'}</span>
-            <button className={s.linkBtn} onClick={() => selectLayer(null)}>Снять выбор</button>
+        <div className={d.body}>
+          <div className={d.head}>
+            <span className={d.chip}>
+              <span className={d.chipIcon}><Icon name={selected.kind === 'text' ? 'text' : 'image'} size={18} /></span>
+              {selected.kind === 'text' ? 'Текст' : 'Картинка'}
+            </span>
+            <button className={d.closeBtn} onClick={() => selectLayer(null)} title="Снять выбор" aria-label="Снять выбор">
+              <Icon name="close" size={18} />
+            </button>
           </div>
 
-          {selected.kind === 'text' && (
-            <>
-              <TextPanel layer={selected} />
-            </>
-          )}
+          {selected.kind === 'text' && <TextPanel layer={selected} />}
 
           {selected.kind === 'image' && dpi !== null && (
-            <p className={dpi >= MIN_DPI ? s.ok : s.warn}>
-              {dpi === Infinity
-                ? 'Векторный файл — качество отличное.'
-                : dpi >= MIN_DPI
-                  ? `Качество печати хорошее (${dpi} dpi).`
-                  : `Низкое разрешение (${dpi} dpi) — при таком размере печать может выйти нечёткой. Уменьшите картинку или загрузите файл побольше.`}
+            <p className={`${d.badge} ${dpi >= MIN_DPI ? '' : d.badgeWarn}`}>
+              <Icon name={dpi >= MIN_DPI ? 'check' : 'alert'} size={18} />
+              <span>
+                {dpi === Infinity
+                  ? 'Векторный файл — качество отличное.'
+                  : dpi >= MIN_DPI
+                    ? `Качество печати хорошее (${dpi} dpi).`
+                    : `Низкое разрешение (${dpi} dpi) — при таком размере печать может выйти нечёткой. Уменьшите картинку или загрузите файл побольше.`}
+              </span>
             </p>
           )}
           {selected.kind === 'image' && selected.crop && (
-            <p className={s.muted}>Пустые поля по краям убрали — размер и цена считаются по самому рисунку.</p>
+            <p className={d.note}>Пустые поля по краям убрали — размер и цена считаются по самому рисунку.</p>
           )}
 
-          <div className={s.align} role="group" aria-label="Выравнивание">
-            <button className={s.btnSmall} onClick={() => stage.current?.align(selected.id, 'centerX')} title="По центру по горизонтали">⇔ Центр</button>
-            <button className={s.btnSmall} onClick={() => stage.current?.align(selected.id, 'centerY')} title="По центру по вертикали">⇕ Центр</button>
-            <button className={s.btnSmall} onClick={() => stage.current?.align(selected.id, 'fit')} title="Максимальный размер в зоне печати">⤢ Вписать</button>
+          <div className={d.seg} role="group" aria-label="Положение и размер">
+            {actions.map((a) => (
+              <button
+                key={a.icon} type="button" className={d.segBtn} title={a.label} aria-label={a.label}
+                aria-pressed={a.pressed} onClick={a.run}
+              ><Icon name={a.icon} size={20} /></button>
+            ))}
           </div>
-          <button
-            className={selected.flipX ? s.btnSmallPrimary : s.btnSmall} aria-pressed={!!selected.flipX}
-            onClick={() => updateLayer(selected.id, { flipX: !selected.flipX })} title="Отразить по горизонтали"
-          >⇋ Отразить</button>
         </div>
       )}
     </>

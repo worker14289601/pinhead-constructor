@@ -4,29 +4,39 @@ import { FONT_GROUPS, FONTS, fontDef, TEXT_COLORS } from '../config/fonts';
 import { ensureFont, onFontLoaded } from '../model/fonts';
 import { useConstructor } from '../model/store';
 import type { TextLayer } from '../model/types';
-import s from './constructor.module.css';
+import { Icon, type IconName } from './icons';
+import d from './design.module.css';
 
-const AlignIcon = ({ mode }: { mode: TextLayer['align'] }) => {
-  // Строки разной длины: у «по левому» и «по правому» они прижаты к своему краю, у «по центру» — по центру.
-  const w = mode === 'center' ? [10, 6, 10] : [16, 10, 13];
-  const x = (i: number) => (mode === 'left' ? 3 : mode === 'right' ? 21 - w[i] : 12 - w[i] / 2);
+const ALIGNS: Array<[TextLayer['align'], string, IconName]> = [
+  ['left', 'По левому краю', 'alignLeft'], ['center', 'По центру', 'alignCenter'], ['right', 'По правому краю', 'alignRight'],
+];
+
+const fontStyle = (family: string) => ({ fontFamily: `"${family}", Arial, sans-serif` });
+
+interface RangeProps {
+  label: string; value: number; shown: string; min: number; max: number; step: number; ariaLabel?: string;
+  onChange: (v: number) => void;
+}
+/** Ползунок: подпись слева, значение справа. */
+function Range({ label, value, shown, min, max, step, ariaLabel, onChange }: RangeProps) {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      {[6, 12, 18].map((y, i) => <line key={y} x1={x(i)} x2={x(i) + w[i]} y1={y} y2={y} />)}
-    </svg>
+    <label className={d.range}>
+      <span className={d.rangeHead}><span>{label}</span><span className={d.rangeVal}>{shown}</span></span>
+      <input type="range" min={min} max={max} step={step} value={value} aria-label={ariaLabel}
+        onChange={(e) => onChange(Number(e.target.value))} />
+    </label>
   );
-};
+}
 
-const ALIGNS: Array<[TextLayer['align'], string]> = [['left', 'По левому краю'], ['center', 'По центру'], ['right', 'По правому краю']];
-
-/** Все настройки выбранного текста: шрифт карточками, начертание, цвет, интервал, обводка, дуга. */
+/** Все настройки выбранного текста: сам текст, шрифт (раскрывающийся список), стиль, форма. */
 export function TextPanel({ layer }: { layer: TextLayer }) {
   const { updateLayer } = useConstructor.getState();
   const [, tick] = useState(0);
+  const [fontsOpen, setFontsOpen] = useState(false);
   const def = fontDef(layer.fontFamily);
   const set = (patch: Partial<TextLayer>, mode: 'commit' | 'merge' = 'commit') => updateLayer(layer.id, patch, mode);
 
-  // Превью карточек — текст слоя нужным шрифтом, поэтому грузим все шрифты списка (только нужные буквы).
+  // Превью строк — текст слоя нужным шрифтом, поэтому грузим все шрифты списка (только нужные буквы).
   const sample = layer.text.split('\n')[0].trim().slice(0, 18) || 'Аа Bb';
   useEffect(() => {
     const t = setTimeout(() => FONTS.forEach((f) => ensureFont(f.family, false, false, sample).catch(() => {})), 250);
@@ -35,98 +45,108 @@ export function TextPanel({ layer }: { layer: TextLayer }) {
   useEffect(() => onFontLoaded(() => tick((n) => n + 1)), []);
 
   const pickFont = (family: string) => {
-    const d = fontDef(family);
+    const fd = fontDef(family);
     // У нового шрифта может не быть жирного/курсива — сбрасываем, чтобы файл печати совпал с выбором.
-    set({ fontFamily: family, bold: layer.bold && !!d?.bold, italic: layer.italic && !!d?.italic });
+    set({ fontFamily: family, bold: layer.bold && !!fd?.bold, italic: layer.italic && !!fd?.italic });
+    setFontsOpen(false);
   };
 
   return (
     <>
-      <textarea
-        className={s.input} rows={2} value={layer.text} aria-label="Текст" placeholder="Введите текст"
-        onChange={(e) => set({ text: e.target.value }, 'merge')}
-      />
+      <div className={`${d.block} ${d.blockFirst}`}>
+        <div className={d.sub}>Текст</div>
+        <textarea
+          className={d.textarea} rows={2} value={layer.text} aria-label="Текст" placeholder="Введите текст"
+          onChange={(e) => set({ text: e.target.value }, 'merge')}
+        />
+      </div>
 
-      <div className={s.sub}>Шрифт</div>
-      {FONT_GROUPS.map(([group, title]) => (
-        <div key={group}>
-          <div className={s.fontGroup}>{title}</div>
-          <div className={s.fonts}>
-            {FONTS.filter((f) => f.group === group).map((f) => (
-              <button
-                key={f.family} type="button" aria-pressed={f.family === layer.fontFamily}
-                className={f.family === layer.fontFamily ? s.fontCardActive : s.fontCard}
-                onClick={() => pickFont(f.family)} title={f.family}
-              >
-                <span style={{ fontFamily: `"${f.family}", Arial, sans-serif` }}>{sample}</span>
-                <small>{f.family}</small>
-              </button>
+      <div className={d.block}>
+        <div className={d.sub}>Шрифт</div>
+        <button
+          type="button" className={fontsOpen ? `${d.fontSel} ${d.fontSelOpen}` : d.fontSel}
+          aria-expanded={fontsOpen} onClick={() => setFontsOpen((o) => !o)} title="Выбрать шрифт"
+        >
+          <span className={d.fontPreview} style={fontStyle(layer.fontFamily)}>{sample}</span>
+          <span className={d.fontName}>{layer.fontFamily}</span>
+          <Icon name="chevronDown" size={18} />
+        </button>
+        {fontsOpen && (
+          <div className={d.fontList}>
+            {FONT_GROUPS.map(([group, title]) => (
+              <div key={group} style={{ display: 'contents' }}>
+                <div className={d.fontGroup}>{title}</div>
+                {FONTS.filter((f) => f.group === group).map((f) => (
+                  <button
+                    key={f.family} type="button" aria-pressed={f.family === layer.fontFamily}
+                    className={f.family === layer.fontFamily ? d.fontOptActive : d.fontOpt}
+                    onClick={() => pickFont(f.family)} title={f.family}
+                  >
+                    <span className={d.fontPreview} style={fontStyle(f.family)}>{sample}</span>
+                    <span className={d.fontName}>{f.family}</span>
+                  </button>
+                ))}
+              </div>
             ))}
           </div>
+        )}
+      </div>
+
+      <div className={d.block}>
+        <div className={d.sub}>Стиль</div>
+        <div className={d.seg} role="group" aria-label="Начертание">
+          <button
+            type="button" className={`${d.segBtn} ${d.compact}`} aria-pressed={layer.bold} disabled={!def?.bold && !layer.bold}
+            title={def && !def.bold ? 'У этого шрифта нет жирного начертания' : 'Жирный'} aria-label="Жирный"
+            onClick={() => set({ bold: !layer.bold })}
+          ><Icon name="bold" size={20} /></button>
+          <button
+            type="button" className={`${d.segBtn} ${d.compact}`} aria-pressed={layer.italic} disabled={!def?.italic && !layer.italic}
+            title={def && !def.italic ? 'У этого шрифта нет курсива' : 'Курсив'} aria-label="Курсив"
+            onClick={() => set({ italic: !layer.italic })}
+          ><Icon name="italic" size={20} /></button>
+          {ALIGNS.map(([a, label, icon]) => (
+            <button
+              key={a} type="button" className={`${d.segBtn} ${d.compact}`} aria-pressed={layer.align === a}
+              title={label} aria-label={label} onClick={() => set({ align: a })}
+            ><Icon name={icon} size={20} /></button>
+          ))}
         </div>
-      ))}
-
-      <div className={s.styleRow}>
-        <button
-          className={layer.bold ? s.toggleOn : s.toggle} aria-pressed={layer.bold} disabled={!def?.bold && !layer.bold}
-          title={def && !def.bold ? 'У этого шрифта нет жирного начертания' : 'Жирный'} aria-label="Жирный"
-          onClick={() => set({ bold: !layer.bold })}
-        ><b>B</b></button>
-        <button
-          className={layer.italic ? s.toggleOn : s.toggle} aria-pressed={layer.italic} disabled={!def?.italic && !layer.italic}
-          title={def && !def.italic ? 'У этого шрифта нет курсива' : 'Курсив'} aria-label="Курсив"
-          onClick={() => set({ italic: !layer.italic })}
-        ><i>I</i></button>
-        <span className={s.sep} />
-        {ALIGNS.map(([a, label]) => (
-          <button
-            key={a} className={layer.align === a ? s.toggleOn : s.toggle} aria-pressed={layer.align === a}
-            title={label} aria-label={label} onClick={() => set({ align: a })}
-          ><AlignIcon mode={a} /></button>
-        ))}
-      </div>
-
-      <div className={s.sub}>Цвет</div>
-      <div className={s.palette} role="group" aria-label="Цвет текста">
-        {TEXT_COLORS.map((c) => (
-          <button
-            key={c} type="button" className={c === layer.fill.toLowerCase() ? s.dotActive : s.dotBtn}
-            style={{ background: c }} aria-label={c} onClick={() => set({ fill: c }, 'merge')}
-          />
-        ))}
-        <input type="color" className={s.colorMini} value={layer.fill} aria-label="Свой цвет" title="Свой цвет"
-          onChange={(e) => set({ fill: e.target.value }, 'merge')} />
-      </div>
-
-      <label className={s.slider}>
-        <span>Межстрочный интервал <b>{layer.lineHeight.toFixed(2)}</b></span>
-        <input type="range" min={0.8} max={2} step={0.05} value={layer.lineHeight}
-          onChange={(e) => set({ lineHeight: Number(e.target.value) }, 'merge')} />
-      </label>
-      <label className={s.slider}>
-        <span>Дуга <b>{layer.arc}</b></span>
-        <input type="range" min={-100} max={100} step={1} value={layer.arc} aria-label="Изгиб текста дугой"
-          onChange={(e) => set({ arc: Number(e.target.value) }, 'merge')} />
-      </label>
-
-      <label className={s.check}>
-        <input
-          type="checkbox" checked={layer.strokeWidth > 0}
-          onChange={(e) => set({ strokeWidth: e.target.checked ? 0.06 : 0 })}
-        />
-        <span>Обводка</span>
-      </label>
-      {layer.strokeWidth > 0 && (
-        <div className={s.row}>
-          <input type="color" className={s.colorMini} value={layer.strokeColor} aria-label="Цвет обводки"
-            onChange={(e) => set({ strokeColor: e.target.value }, 'merge')} />
-          <label className={`${s.slider} ${s.grow}`}>
-            <span>Толщина</span>
-            <input type="range" min={0.01} max={0.2} step={0.01} value={layer.strokeWidth}
-              onChange={(e) => set({ strokeWidth: Number(e.target.value) }, 'merge')} />
+        <div className={d.palette} role="group" aria-label="Цвет текста">
+          {TEXT_COLORS.map((c) => (
+            <button
+              key={c} type="button" className={c === layer.fill.toLowerCase() ? d.dotActive : d.dot}
+              style={{ background: c }} aria-label={c} onClick={() => set({ fill: c }, 'merge')}
+            />
+          ))}
+          <label className={d.customColor} title="Свой цвет">
+            <input type="color" className={d.colorInput} value={layer.fill} aria-label="Свой цвет"
+              onChange={(e) => set({ fill: e.target.value }, 'merge')} />
+            Свой
           </label>
         </div>
-      )}
+      </div>
+
+      <div className={d.block}>
+        <div className={d.sub}>Форма</div>
+        <Range label="Межстрочный интервал" value={layer.lineHeight} shown={layer.lineHeight.toFixed(2)}
+          min={0.8} max={2} step={0.05} onChange={(v) => set({ lineHeight: v }, 'merge')} />
+        <Range label="Дуга" value={layer.arc} shown={String(layer.arc)} min={-100} max={100} step={1}
+          ariaLabel="Изгиб текста дугой" onChange={(v) => set({ arc: v }, 'merge')} />
+        <label className={d.switch}>
+          <span>Обводка</span>
+          <input type="checkbox" checked={layer.strokeWidth > 0} onChange={(e) => set({ strokeWidth: e.target.checked ? 0.06 : 0 })} />
+          <span className={d.track} aria-hidden />
+        </label>
+        {layer.strokeWidth > 0 && (
+          <div className={d.strokeRow}>
+            <input type="color" className={d.colorInput} value={layer.strokeColor} aria-label="Цвет обводки"
+              onChange={(e) => set({ strokeColor: e.target.value }, 'merge')} />
+            <Range label="Толщина" value={layer.strokeWidth} shown={layer.strokeWidth.toFixed(2)}
+              min={0.01} max={0.2} step={0.01} onChange={(v) => set({ strokeWidth: v }, 'merge')} />
+          </div>
+        )}
+      </div>
     </>
   );
 }

@@ -61,6 +61,7 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
       const sides = sidesFor(garment);
       const previews: Array<{ side: Side; dataUrl: string }> = [];
       const original = side;
+      stage.current?.setTurnEnabled(false);
       try {
         for (const sd of sides) {
           if (!layers.some((l) => l.side === sd)) continue;
@@ -78,6 +79,7 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
         }
       } finally {
         setSide(original);
+        stage.current?.setTurnEnabled(true);
       }
 
       // Исходные файлы клиента — как загружены, без пересжатия (один файл — один раз, даже если слоёв несколько).
