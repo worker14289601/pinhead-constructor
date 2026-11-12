@@ -9,14 +9,20 @@ import { FRAME } from '../config/garment-shapes';
 import { METHOD_INFO, WHITE_MIN_CHANNEL } from '../config/pricing';
 import { hexToRgb, isLight } from '../canvas/tint';
 import { designBounds } from '../model/bounds';
+import { clearDraft, hasContent, loadDraft, saveDraft, type Draft } from '../model/draft';
+import { ensureFont, onFontLoaded } from '../model/fonts';
 import { calcPrice } from '../model/pricing';
-import { imageDpi, MIN_DPI, validateFile, ACCEPTED_TYPES } from '../model/quality';
+import { validateFile, ACCEPTED_TYPES } from '../model/quality';
 import { canRedo, canUndo, selectGarment, selectVariant, useConstructor } from '../model/store';
 import { contentBox } from '../model/trim';
 import { SIDE_LABEL, SIDE_TAB, type PrintMethod } from '../model/types';
 import type { DesignStageHandle } from '../canvas/DesignStage';
+import { GarmentPicker } from './GarmentPicker';
+import { DesignPanel } from './DesignPanel';
+import { DraftPrompt } from './DraftPrompt';
 import { LayersPanel } from './LayersPanel';
 import { OrderForm } from './OrderForm';
+import { SizeChart } from './SizeChart';
 import s from './constructor.module.css';
 
 // Konva работает только в браузере.
@@ -25,10 +31,6 @@ const DesignStage = dynamic(() => import('../canvas/DesignStage').then((m) => m.
   loading: () => <div className={s.stub}>Загружаем редактор…</div>,
 });
 
-const TYPE_LABEL: Record<string, string> = {
-  tshirt: 'Футболки', longsleeve: 'Лонгсливы', sweatshirt: 'Свитшоты', hoodie: 'Худи', totebag: 'Шопперы', cap: 'Кепки',
-};
-const FONTS = ['Arial', 'Georgia', 'Impact', 'Courier New', 'Trebuchet MS'];
 
 /** Стрелка отмены; для повтора — зеркально. Символы ↶ ↷ в системных шрифтах выглядят по-разному. */
 const HistoryIcon = ({ redo }: { redo?: boolean }) => (
@@ -39,8 +41,8 @@ const HistoryIcon = ({ redo }: { redo?: boolean }) => (
   </svg>
 );
 
-type Tab = 'garment' | 'design' | 'order';
-const TABS: Array<[Tab, string]> = [['garment', 'Изделие'], ['design', 'Дизайн'], ['order', 'Размеры']];
+type Tab = 'garment' | 'design' | 'layers' | 'order';
+const TABS: Array<[Tab, string]> = [['garment', 'Изделие'], ['design', 'Дизайн'], ['layers', 'Слои'], ['order', 'Размеры']];
 
 /** ordersEndpoint — куда уходит заявка: POST {endpoint}/number выдаёт номер, POST {endpoint} принимает заявку. */
 export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpoint?: string }) {
@@ -52,6 +54,9 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
   const [error, setError] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [orderOpen, setOrderOpen] = useState(false);
+  const [layersOpen, setLayersOpen] = useState(true);
+  const [dragOver, setDragOver] = useState(false);
+  const [chartOpen, setChartOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('garment');
   const undoable = useConstructor(canUndo);
   const redoable = useConstructor(canRedo);
@@ -65,6 +70,11 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
     return () => ac.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // На мобильном выбор принта на холсте открывает его настройки (вкладка «Дизайн»).
+  useEffect(() => {
+    if (st.selectedLayerId) setTab((t) => (t === 'garment' ? 'design' : t));
+  }, [st.selectedLayerId]);
 
   // Cmd/Ctrl+Z — отмена, Cmd/Ctrl+Shift+Z и Ctrl+Y — повтор, Delete — удалить выбранный слой.
   // Когда фокус в поле ввода, клавиши остаются полю (там своя отмена набора).
@@ -92,6 +102,38 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
     return () => window.removeEventListener('keydown', onKey);
   }, [orderOpen]);
 
+  // Черновик: при открытии спрашиваем, продолжать ли; пока не ответили — ничего не сохраняем.
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [draftGate, setDraftGate] = useState<'wait' | 'ask' | 'open'>('wait');
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (draftGate !== 'wait' || !st.garments.length) return;
+    const d = loadDraft();
+    if (d && hasContent(d)) { setDraft(d); setDraftGate('ask'); } else setDraftGate('open');
+  }, [draftGate, st.garments.length]);
+  useEffect(() => {
+    if (draftGate !== 'open') return;
+    const t = setTimeout(async () => {
+      const r = await saveDraft({
+        garmentId: st.garmentId, variantId: st.variantId, side: st.side, method: st.method, sizes: st.sizes, layers: st.layers,
+      });
+      if (r === 'no-images') setNotice('Черновик сохранён без картинок: не хватило места в браузере.');
+      else if (r === 'failed') setNotice('Не получилось сохранить черновик в браузере.');
+      else setNotice(null);
+    }, 800);
+    return () => clearTimeout(t);
+  }, [draftGate, st.garmentId, st.variantId, st.side, st.method, st.sizes, st.layers]);
+
+  // Шрифты текстовых слоёв: грузим по мере появления, после загрузки пересчитываем габарит.
+  const fontKey = st.layers.flatMap((l) => (l.kind === 'text' ? [`${l.fontFamily}|${l.bold}|${l.italic}|${l.text}`] : [])).join('\n');
+  useEffect(() => {
+    for (const line of fontKey ? fontKey.split('\n') : []) {
+      const [family, bold, italic, ...text] = line.split('|');
+      ensureFont(family, bold === 'true', italic === 'true', text.join('|')).catch(() => {});
+    }
+  }, [fontKey]);
+  useEffect(() => onFontLoaded(() => useConstructor.getState().bumpFonts()), []);
+
   const hex = variant?.hex ?? '#ffffff';
   const price = useMemo(() => {
     if (!variant || !garment) return null;
@@ -99,7 +141,9 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
     const bounds = designBounds(garment, st.layers);
     const isWhite = hexToRgb(hex).every((c) => c >= WHITE_MIN_CHANNEL);
     return calcPrice({ garmentPrice: variant.price, isWhite, method: st.method, bounds, sizes: st.sizes });
-  }, [variant, garment, hex, st.method, st.layers, st.sizes]);
+    // fontTick: габарит текста зависит от загруженного шрифта.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [variant, garment, hex, st.method, st.layers, st.sizes, st.fontTick]);
 
   const onFile = (f?: File) => {
     if (!f || !garment) return;
@@ -129,11 +173,8 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
     img.src = url;
   };
 
+  const addText = () => { st.addText(isLight(hex) ? '#111111' : '#ffffff'); track('text_add'); };
   const selected = st.layers.find((l) => l.id === st.selectedLayerId);
-  const sideHasLayers = st.layers.some((l) => l.side === st.side);
-  const dpi = selected?.kind === 'image' && garment
-    ? imageDpi(selected, printAreaFor(garment, selected.side).widthCm, selected.isVector)
-    : null;
 
   const hasDesign = st.layers.some((l) => sides.includes(l.side));
   const canOrder = !!price?.qty && hasDesign;
@@ -151,19 +192,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
         <h3 className={s.h}>Изделие</h3>
         {error && <p className={s.err}>{error}</p>}
         {!st.garments.length && !error && <p className={s.muted}>Загружаем каталог…</p>}
-        <div className={s.garments}>
-          {st.garments.map((g) => (
-            <button
-              key={g.id}
-              className={g.id === st.garmentId ? s.chipActive : s.chip}
-              onClick={() => { st.selectGarment(g.id); track('garment_select', { id: g.id }); }}
-              title={TYPE_LABEL[g.type]}
-            >
-              <span>{g.name}</span>
-              <small>от {g.basePrice} ₽</small>
-            </button>
-          ))}
-        </div>
+        <GarmentPicker garments={st.garments} garmentId={st.garmentId} onSelect={st.selectGarment} />
       </section>
 
       {/* Холст */}
@@ -186,13 +215,17 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
             </button>
           ))}
         </div>
-        <div className={s.stage}>
-          <DesignStage apiRef={stageRef} />
-          {!sideHasLayers && garment && (
-            <button className={s.emptyHint} onClick={() => { setTab('design'); fileRef.current?.click(); }}>
-              + Добавьте картинку или текст
-            </button>
-          )}
+        <div
+          className={dragOver ? s.stageDrop : s.stage}
+          onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDragOver(true); } }}
+          onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(false); }}
+          onDrop={(e) => { e.preventDefault(); setDragOver(false); onFile(e.dataTransfer.files?.[0]); }}
+        >
+          <DesignStage
+            apiRef={stageRef}
+            empty={{ onUpload: () => fileRef.current?.click(), onText: addText }}
+          />
+          {dragOver && <div className={s.dropHint}>Отпустите файл, чтобы добавить</div>}
         </div>
         {/* Цвет — под изделием: меняется в один клик с любого экрана, без прокрутки панелей. */}
         {garment && garment.variants.length > 0 && (
@@ -226,65 +259,22 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
       </nav>
 
       <aside className={`${s.panel} ${s.right}`}>
-        {/* Дизайн */}
+        {/* Дизайн: содержимое зависит от выбранного слоя */}
         <section className={s.section} data-section="design">
-          <h3 className={s.h}>Дизайн · {SIDE_LABEL[st.side]}</h3>
-          <div className={s.tools}>
-            <button className={s.btnPrimary} onClick={() => fileRef.current?.click()}>Загрузить картинку</button>
-            <button className={s.btn} onClick={() => { st.addText(isLight(hex) ? '#111111' : '#ffffff'); track('text_add'); }}>
-              Добавить текст
-            </button>
-          </div>
+          <DesignPanel stage={stageRef} fileError={fileError} onUpload={() => fileRef.current?.click()} onAddText={addText} />
           <input
             ref={fileRef} type="file" hidden accept={ACCEPTED_TYPES.join(',')}
             onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = ''; }}
           />
-          <p className={s.muted}>PNG, JPG, WEBP или SVG до 15 МБ. Лучше — PNG с прозрачным фоном.</p>
-          {fileError && <p className={s.err}>{fileError}</p>}
+        </section>
 
-          {/* Список — над свойствами: при выборе слоя строки не съезжают из-под пальца. */}
-          <LayersPanel hex={hex} />
+        {/* Слои */}
+        <section className={s.section} data-section="layers" data-collapsed={layersOpen ? undefined : ''}>
+          <LayersPanel hex={hex} open={layersOpen} onToggle={() => setLayersOpen((v) => !v)} />
+        </section>
 
-          {selected?.kind === 'text' && (
-            <div className={s.props}>
-              <input
-                className={s.input} value={selected.text} aria-label="Текст"
-                onChange={(e) => st.updateLayer(selected.id, { text: e.target.value }, 'merge')}
-              />
-              <div className={s.row}>
-                <select
-                  className={s.input} value={selected.fontFamily} aria-label="Шрифт"
-                  onChange={(e) => st.updateLayer(selected.id, { fontFamily: e.target.value })}
-                >
-                  {FONTS.map((f) => <option key={f} value={f} style={{ fontFamily: f }}>{f}</option>)}
-                </select>
-                <input
-                  type="color" className={s.color} value={selected.fill} aria-label="Цвет текста"
-                  onChange={(e) => st.updateLayer(selected.id, { fill: e.target.value }, 'merge')}
-                />
-              </div>
-            </div>
-          )}
-          {selected?.kind === 'image' && dpi !== null && (
-            <p className={dpi >= MIN_DPI ? s.ok : s.warn}>
-              {dpi === Infinity
-                ? 'Векторный файл — качество отличное.'
-                : dpi >= MIN_DPI
-                  ? `Качество печати хорошее (${dpi} dpi).`
-                  : `Низкое разрешение (${dpi} dpi) — при таком размере печать может выйти нечёткой. Уменьшите картинку или загрузите файл побольше.`}
-            </p>
-          )}
-          {selected?.kind === 'image' && selected.crop && (
-            <p className={s.muted}>Пустые поля по краям убрали — размер и цена считаются по самому рисунку.</p>
-          )}
-          {selected && (
-            <div className={s.align} role="group" aria-label="Выравнивание">
-              <button className={s.btnSmall} onClick={() => stageRef.current?.align(selected.id, 'centerX')} title="По центру по горизонтали">⇔ Центр</button>
-              <button className={s.btnSmall} onClick={() => stageRef.current?.align(selected.id, 'centerY')} title="По центру по вертикали">⇕ Центр</button>
-              <button className={s.btnSmall} onClick={() => stageRef.current?.align(selected.id, 'fit')} title="Максимальный размер в зоне печати">⤢ Вписать</button>
-            </div>
-          )}
-
+        {/* Размеры */}
+        <section className={s.section} data-section="order">
           <h3 className={s.h}>Нанесение</h3>
           {(Object.keys(METHOD_INFO) as PrintMethod[]).map((m) => (
             <label key={m} className={s.radio}>
@@ -292,10 +282,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
               <span><b>{METHOD_INFO[m].title}</b><br /><small>{METHOD_INFO[m].hint}</small></span>
             </label>
           ))}
-        </section>
 
-        {/* Размеры */}
-        <section className={s.section} data-section="order">
           <h3 className={s.h}>Размеры и количество</h3>
           <div className={s.sizes}>
             {variant?.sizes.map((size) => {
@@ -315,6 +302,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
               );
             })}
           </div>
+          <button className={s.linkBtn} onClick={() => setChartOpen(true)}>Таблица размеров</button>
           {price && price.sides.length > 0 && (
             <div className={s.breakdown}>
               <div className={s.line}><span>Изделие</span><span>{price.garment} ₽</span></div>
@@ -343,6 +331,15 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
         </footer>
       </aside>
 
+      {draftGate === 'ask' && draft && (
+        <DraftPrompt
+          draft={draft}
+          onNew={() => { clearDraft(); setDraft(null); setDraftGate('open'); }}
+          onContinue={() => { st.hydrate(draft); setDraft(null); setDraftGate('open'); }}
+        />
+      )}
+      {notice && <div className={s.notice} role="status">{notice}</div>}
+      {chartOpen && <SizeChart sizes={variant?.sizes ?? []} onClose={() => setChartOpen(false)} />}
       {orderOpen && garment && variant && price && (
         <OrderForm garment={garment} variant={variant} price={price} stage={stageRef} endpoint={ordersEndpoint} onClose={() => setOrderOpen(false)} />
       )}

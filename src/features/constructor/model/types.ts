@@ -75,6 +75,8 @@ interface LayerBase {
   x: number;
   y: number;
   rotation: number;
+  /** Отражение по горизонтали: рисуется внутри слоя, поворот и размер от него не зависят. */
+  flipX?: boolean;
 }
 
 export interface ImageLayer extends LayerBase {
@@ -98,6 +100,15 @@ export interface TextLayer extends LayerBase {
   fontSize: number; // доля ширины зоны печати
   fill: string;
   align: 'left' | 'center' | 'right';
+  bold: boolean;
+  italic: boolean;
+  /** Межстрочный шаг в долях кегля. */
+  lineHeight: number;
+  /** Обводка: толщина наружу в долях кегля; 0 — без обводки. */
+  strokeWidth: number;
+  strokeColor: string;
+  /** Изгиб дугой −100…+100: 0 — прямой, плюс — горбом вверх, минус — улыбкой. */
+  arc: number;
 }
 
 export type DesignLayer = ImageLayer | TextLayer;

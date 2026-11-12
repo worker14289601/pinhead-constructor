@@ -4,11 +4,16 @@ import { Group, Image as KImage, Layer, Line, Path, Rect, Stage, Transformer } f
 import type Konva from 'konva';
 import { FRAME, SHAPES } from '../config/garment-shapes';
 import { printAreaFor } from '../config/print-areas';
+import { priceListFor } from '../config/pricing';
+import { layerSizeCm } from '../model/bounds';
+import { formatFor } from '../model/pricing';
+import { fontReady } from '../model/fonts';
 import { selectGarment, selectVariant, useConstructor } from '../model/store';
 import { isSleeve } from '../model/types';
 import { alignLayer, snapToCenter, type AlignMode } from './align';
 import { LayerNode } from './LayerNode';
 import { SelectionControls } from './SelectionControls';
+import c from './controls.module.css';
 import { SILHOUETTES, SILHOUETTE_VIEWBOX } from './silhouettes';
 import { isLight, useTintedMockup } from './tint';
 
@@ -33,6 +38,10 @@ const MAX_EXPORT_AREA = 16_000_000;
 const MIN_NODE_PX = 12;
 /** Максимальное приближение маленькой зоны (рукав): мокапы 800×920, дальше картинка мылится. */
 const MAX_ZOOM = 2.4;
+/** Предел приближения кнопками (вместе с приближением рукава) и шаг одного нажатия. */
+const MAX_TOTAL_ZOOM = 4;
+const ZOOM_STEP = 1.25;
+const MAX_USER_ZOOM = 3;
 /** Порог прилипания к центру зоны, в пикселях экрана. */
 const SNAP_PX = 6;
 /** Фирменный лайм; на светлой ткани он не виден, поэтому рамка и направляющие там чёрные. */
@@ -40,7 +49,11 @@ const LIME = '#99ff00';
 const INK = '#000000';
 
 /** apiRef — обычный проп, а не ref: next/dynamic не пробрасывает ref в ленивый компонент. */
-export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }) {
+export function DesignStage({ apiRef, empty }: {
+  apiRef: RefObject<DesignStageHandle>;
+  /** Действия приглашения на пустой стороне: загрузить картинку / добавить текст. */
+  empty?: { onUpload: () => void; onText: () => void };
+}) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
   const printRef = useRef<Konva.Group>(null);
@@ -48,11 +61,13 @@ export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }
   const guideRef = useRef<Konva.Rect>(null);
   const trRef = useRef<Konva.Transformer>(null);
   const [size, setSize] = useState({ w: 400, h: 460 });
+  const [zoom, setZoom] = useState(1);
   const [guides, setGuides] = useState({ v: false, h: false });
 
   const garment = useConstructor(selectGarment);
+  const garmentId = garment?.id;
   const variant = useConstructor(selectVariant);
-  const { side, layers, selectedLayerId, selectLayer, updateLayer, removeLayer, duplicateLayer } = useConstructor();
+  const { method, side, layers, selectedLayerId, selectLayer, updateLayer, removeLayer, duplicateLayer } = useConstructor();
 
   const shape = garment?.shapeId ? SHAPES[garment.shapeId] : null;
   const hex = variant?.hex ?? '#e4e4e4';
@@ -76,12 +91,29 @@ export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }
 
   const pa = garment ? printAreaFor(garment, side) : null;
   const area = pa ? { x: pa.x * size.w, y: pa.y * size.h, w: pa.width * size.w, h: pa.height * size.h } : null;
+  // Приближение — на время просмотра одной стороны: при смене стороны и модели возвращаем 100%.
+  useEffect(() => setZoom(1), [side, garmentId]);
+
   const sideLayers = layers.filter((l) => l.side === side);
 
+  // Подпись под выделенным принтом: «26 × 5 см · A4».
+  const selectedLayer = sideLayers.find((l) => l.id === selectedLayerId);
+  let caption: string | undefined;
+  if (garment && selectedLayer) {
+    const sz = layerSizeCm(garment, selectedLayer);
+    if (sz) {
+      const { format, oversize } = formatFor(sz.wCm, sz.hCm, priceListFor(method));
+      const fmt = (n: number) => (Math.round(n * 10) / 10).toLocaleString('ru-RU');
+      caption = `${fmt(sz.wCm)} × ${fmt(sz.hCm)} см · ${oversize ? `больше ${format.name}` : format.name}`;
+    }
+  }
+
   // Рукав — маленькая зона: приближаем холст к ней, не выходя за края кадра.
+  // Кнопки масштаба умножают это приближение; центр — середина зоны печати, края кадра не покидаем.
   const view = { k: 1, x: 0, y: 0 };
-  if (isSleeve(side) && area) {
-    const k = Math.min(MAX_ZOOM, (0.5 * size.h) / area.h, (0.5 * size.w) / area.w);
+  if (area && (isSleeve(side) || zoom > 1)) {
+    const base = isSleeve(side) ? Math.min(MAX_ZOOM, (0.5 * size.h) / area.h, (0.5 * size.w) / area.w) : 1;
+    const k = Math.min(MAX_TOTAL_ZOOM, base * zoom);
     const clamp = (v: number, min: number) => Math.min(0, Math.max(min, v));
     view.k = k;
     view.x = clamp(size.w / 2 - (area.x + area.w / 2) * k, size.w - size.w * k);
@@ -116,7 +148,8 @@ export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }
     if (shape && mockup?.url !== shape.images[side]) return false;
     return st.layers.filter((l) => l.side === side).every((l) => {
       const n = g.findOne(`#${l.id}`);
-      return !!n && (l.kind !== 'image' || !!(n as Konva.Image).image());
+      if (l.kind === 'text') return !!n && fontReady(l.fontFamily, l.bold, l.italic, l.text);
+      return !!n && !!(n as Konva.Image).image();
     });
   };
 
@@ -263,14 +296,31 @@ export function DesignStage({ apiRef }: { apiRef: RefObject<DesignStageHandle> }
           />
         </Layer>
       </Stage>
+      <div className={c.zoom} role="group" aria-label="Масштаб">
+        <button type="button" onClick={() => setZoom((z) => Math.max(1, z / ZOOM_STEP))} disabled={zoom <= 1} aria-label="Уменьшить" title="Уменьшить">−</button>
+        <button type="button" onClick={() => setZoom(1)} disabled={zoom === 1} aria-label="Сбросить масштаб" title="Сбросить масштаб">{Math.round(zoom * 100)}%</button>
+        <button type="button" onClick={() => setZoom((z) => Math.min(MAX_USER_ZOOM, z * ZOOM_STEP))} disabled={zoom >= MAX_USER_ZOOM} aria-label="Увеличить" title="Увеличить">+</button>
+      </div>
+      {area && empty && sideLayers.length === 0 && (
+        // Приглашение — внутри зоны печати; для рукава зона приближена, поэтому считаем с учётом view.
+        <div
+          className={c.empty}
+          style={{ left: area.x * view.k + view.x, top: area.y * view.k + view.y, width: area.w * view.k, height: area.h * view.k }}
+        >
+          <b>Создайте дизайн</b>
+          <button type="button" className={c.emptyPrimary} onClick={empty.onUpload}>Загрузить картинку</button>
+          <button type="button" className={c.emptyBtn} onClick={empty.onText}>Добавить текст</button>
+        </div>
+      )}
       {area && (
         <SelectionControls
           stage={stageRef.current}
-          layer={sideLayers.find((l) => l.id === selectedLayerId)}
+          layer={selectedLayer}
           area={{ w: area.w, h: area.h }}
           size={size}
           minPx={MIN_NODE_PX}
           accent={accent}
+          caption={caption}
           onCommit={(p) => selectedLayerId && updateLayer(selectedLayerId, p)}
           onRemove={() => selectedLayerId && removeLayer(selectedLayerId)}
           onDuplicate={() => selectedLayerId && duplicateLayer(selectedLayerId)}

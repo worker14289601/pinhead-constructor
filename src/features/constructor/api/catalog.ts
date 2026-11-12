@@ -1,4 +1,5 @@
 import { shapeFor } from '../config/garment-shapes';
+import { sortSizes } from '../model/sizes';
 import type { ApiProduct, Garment, GarmentType, GarmentVariant } from '../model/types';
 
 export const PNHD_API_URL = process.env.NEXT_PUBLIC_PNHD_API_URL ?? 'https://api.pnhd.ru';
@@ -34,7 +35,7 @@ function toVariant(p: ApiProduct): GarmentVariant {
     colorName: p.color,
     hex,
     price: p.price,
-    sizes: p.sizes.map((s) => s.name),
+    sizes: sortSizes(p.sizes.map((s) => s.name)),
     mockups: { front: abs(p.editor_front_view), back: abs(p.editor_back_view) },
   };
 }

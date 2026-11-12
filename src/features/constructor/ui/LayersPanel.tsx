@@ -9,20 +9,24 @@ const label = (l: DesignLayer) => (l.kind === 'image' ? l.fileName : l.text.trim
  * Слои текущей стороны: сверху — то, что нарисовано поверх. Тап по строке выбирает слой
  * (так можно достать картинку, перекрытую другой), кнопки меняют порядок, дублируют и удаляют.
  */
-export function LayersPanel({ hex }: { hex: string }) {
+export function LayersPanel({ hex, open, onToggle }: { hex: string; open: boolean; onToggle: () => void }) {
   const side = useConstructor((st) => st.side);
   const layers = useConstructor((st) => st.layers);
   const selectedId = useConstructor((st) => st.selectedLayerId);
   const { selectLayer, moveLayer, duplicateLayer, removeLayer } = useConstructor.getState();
 
   const sideLayers = layers.filter((l) => l.side === side);
-  if (!sideLayers.length) return null;
   const top = [...sideLayers].reverse();
 
   return (
     <>
-      <h3 className={s.h}>Слои</h3>
-      <ul className={s.layers}>
+      <div className={s.layersHead}>
+        <h3 className={s.h}>Слои · {top.length}</h3>
+        {/* На мобильном слои — отдельная вкладка, сворачивать нечего. */}
+        <button className={`${s.linkBtn} ${s.desktopOnly}`} onClick={onToggle} aria-expanded={open}>{open ? 'Свернуть' : 'Развернуть'}</button>
+      </div>
+      {!top.length && <p className={s.muted}>Пока пусто — добавьте картинку или текст.</p>}
+      <ul className={s.layers} hidden={!open}>
         {top.map((l, i) => {
           const active = l.id === selectedId;
           return (

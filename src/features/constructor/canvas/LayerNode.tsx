@@ -18,6 +18,20 @@ interface Props {
 /** Имя узлов дизайна — по нему холст отличает их от служебных (тени, рамки). */
 export const DESIGN_NODE = 'design';
 
+/** Рисует Konva.Image зеркально по горизонтали (с учётом обрезки пустых полей). */
+function flippedImage(ctx: Konva.Context, shape: Konva.Shape) {
+  const img = (shape as Konva.Image).image() as CanvasImageSource | undefined;
+  if (!img) return;
+  const c = ctx._context;
+  const crop = shape.getAttr('crop') as { x: number; y: number; width: number; height: number } | undefined;
+  c.save();
+  c.translate(shape.width(), 0);
+  c.scale(-1, 1);
+  if (crop) c.drawImage(img, crop.x, crop.y, crop.width, crop.height, 0, 0, shape.width(), shape.height());
+  else c.drawImage(img, 0, 0, shape.width(), shape.height());
+  c.restore();
+}
+
 /** Слой дизайна. Координаты хранятся в долях зоны печати, на экране — пиксели. */
 export function LayerNode({ layer, area, onSelect, onChange, onDrag }: Props) {
   const [img] = useImage(layer.kind === 'image' ? layer.src : '', 'anonymous');
@@ -51,6 +65,7 @@ export function LayerNode({ layer, area, onSelect, onChange, onDrag }: Props) {
     return (
       <KImage
         {...common}
+        sceneFunc={layer.flipX ? flippedImage : undefined}
         image={img}
         crop={layer.crop}
         width={layer.width * area.w}
@@ -60,9 +75,9 @@ export function LayerNode({ layer, area, onSelect, onChange, onDrag }: Props) {
   }
 
   // Текст рисуем сами: у Konva.Text рамка — строка шрифта с запасом сверху и снизу,
-  // а нужна рамка по буквам. Точка (x, y) — середина надписи.
+  // а нужна рамка по буквам (и по обводке, и по дуге). Точка (x, y) — середина надписи.
   const fontPx = layer.fontSize * area.w;
-  const box = measureText(layer.text, layer.fontFamily, fontPx, layer.align);
+  const box = measureText(layer.text, layer, fontPx);
   return (
     <Shape
       {...common}
@@ -73,11 +88,29 @@ export function LayerNode({ layer, area, onSelect, onChange, onDrag }: Props) {
       fill={layer.fill}
       sceneFunc={(ctx, shape) => {
         const c = ctx._context;
-        c.font = textFont(layer.fontFamily, fontPx);
-        c.textAlign = 'left';
+        c.font = textFont(layer, fontPx);
+        c.textAlign = box.centered ? 'center' : 'left';
         c.textBaseline = 'alphabetic';
+        c.lineJoin = 'round';
+        if (layer.flipX) { c.translate(box.width, 0); c.scale(-1, 1); }
+        const put = (paint: (it: (typeof box.items)[number]) => void) => {
+          for (const it of box.items) {
+            c.save();
+            c.translate(it.x, it.y);
+            c.rotate(it.rot);
+            paint(it);
+            c.restore();
+          }
+        };
+        // Сначала вся обводка, потом заливка: иначе обводка соседней буквы закрыла бы заливку предыдущей.
+        // Линия по контуру делится пополам, поэтому толщина вдвое — наружу выходит нужная.
+        if (box.stroke > 0) {
+          c.strokeStyle = layer.strokeColor;
+          c.lineWidth = box.stroke * 2;
+          put((it) => c.strokeText(it.text, 0, 0));
+        }
         c.fillStyle = shape.fill() as string;
-        for (const l of box.lines) c.fillText(l.text, l.x, l.y);
+        put((it) => c.fillText(it.text, 0, 0));
       }}
       hitFunc={(ctx, shape) => {
         ctx.beginPath();

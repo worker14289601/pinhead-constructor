@@ -1,5 +1,6 @@
 'use client';
 import { create } from 'zustand';
+import { DEFAULT_FONT } from '../config/fonts';
 import { sidesFor } from '../config/print-areas';
 import type {
   DesignLayer, Garment, ImageLayer, PrintMethod, Side, SizeQuantities, TextLayer,
@@ -38,8 +39,13 @@ interface ConstructorState {
   sizes: SizeQuantities;
   past: Snapshot[];
   future: Snapshot[];
+  /** Растёт, когда загрузился шрифт: слои и цена перерисовываются с настоящими метриками. */
+  fontTick: number;
+  bumpFonts: () => void;
 
   setCatalog: (g: Garment[]) => void;
+  /** Вернуть дизайн из черновика: изделие, цвет, слои, размеры. История начинается заново. */
+  hydrate: (d: import('./draft').DraftState) => void;
   selectGarment: (id: string) => void;
   selectVariant: (productId: string) => void;
   setSide: (s: Side) => void;
@@ -102,10 +108,30 @@ export const useConstructor = create<ConstructorState>((set, get) => {
     sizes: {},
     past: [],
     future: [],
+    fontTick: 0,
+    bumpFonts: () => set((s) => ({ fontTick: s.fontTick + 1 })),
 
     setCatalog: (garments) => {
       const first = garments[0];
       set({ garments, garmentId: first?.id ?? null, variantId: first?.variants[0]?.productId ?? null });
+    },
+    hydrate: (d) => {
+      const g = get().garments.find((x) => x.id === d.garmentId) ?? selectGarment(get());
+      const v = g?.variants.find((x) => x.productId === d.variantId) ?? g?.variants[0];
+      const sideOk = sidesFor(g).includes(d.side);
+      set({
+        garmentId: g?.id ?? null,
+        variantId: v?.productId ?? null,
+        side: sideOk ? d.side : 'front',
+        method: d.method,
+        // Количество — только по размерам, которые есть у выбранного цвета.
+        sizes: Object.fromEntries(Object.entries(d.sizes).filter(([k]) => v?.sizes.includes(k))),
+        layers: d.layers,
+        selectedLayerId: null,
+        past: [],
+        future: [],
+      });
+      lastMerge = null;
     },
     // Дизайн при смене модели и цвета сохраняется — меняется только изделие под ним. В историю не входит.
     selectGarment: (id) => {
@@ -134,9 +160,10 @@ export const useConstructor = create<ConstructorState>((set, get) => {
     addText: (fill, text = 'Твой текст') => {
       const id = uid();
       const layer: TextLayer = {
-        id, kind: 'text', side: get().side, text, fontFamily: 'Arial', fontSize: 0.12,
+        id, kind: 'text', side: get().side, text, fontFamily: DEFAULT_FONT, fontSize: 0.12,
         // у текста x/y — центр надписи
         fill, align: 'center', x: 0.5, y: 0.12, rotation: 0,
+        bold: true, italic: false, lineHeight: 1.1, strokeWidth: 0, strokeColor: fill === '#ffffff' ? '#111111' : '#ffffff', arc: 0,
       };
       set((s) => ({ ...record(s), layers: [...s.layers, layer], selectedLayerId: id }));
     },

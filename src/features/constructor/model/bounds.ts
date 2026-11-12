@@ -18,7 +18,7 @@ function layerRect(l: DesignLayer, h: number) {
     local = [0, 0, w, (w * l.naturalHeight) / l.naturalWidth];
   } else {
     // Габарит по буквам — тот же, что у узла на холсте.
-    const box = measureText(l.text, l.fontFamily, l.fontSize * W, l.align);
+    const box = measureText(l.text, l, l.fontSize * W);
     local = [-box.width / 2, -box.height / 2, box.width / 2, box.height / 2];
   }
   const [lx1, ly1, lx2, ly2] = local;
@@ -31,6 +31,17 @@ function layerRect(l: DesignLayer, h: number) {
     ys.push(oy + cx * sin + cy * cos);
   }
   return { x1: Math.min(...xs), y1: Math.min(...ys), x2: Math.max(...xs), y2: Math.max(...ys) };
+}
+
+/** Размер одного слоя в сантиметрах (с учётом поворота) — для подписи под рамкой выделения. */
+export function layerSizeCm(garment: Garment, layer: DesignLayer): { wCm: number; hCm: number } | null {
+  const pa = printAreaFor(garment, layer.side);
+  const h = (W * pa.height * FRAME.h) / (pa.width * FRAME.w);
+  const r = layerRect(layer, h);
+  const cmPerPx = pa.widthCm / W;
+  const wCm = (r.x2 - r.x1) * cmPerPx;
+  const hCm = (r.y2 - r.y1) * cmPerPx;
+  return wCm > 0 && hCm > 0 ? { wCm, hCm } : null;
 }
 
 /**

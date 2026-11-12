@@ -65,56 +65,128 @@ export function contentBox(img: HTMLImageElement): CropRect | null {
   return { x: rx, y: ry, width: rw, height: rh };
 }
 
+/** Параметры начертания текста, влияющие на габарит. */
+export interface TextStyle {
+  fontFamily: string;
+  bold: boolean;
+  italic: boolean;
+  align: 'left' | 'center' | 'right';
+  /** Межстрочный шаг в долях кегля. */
+  lineHeight: number;
+  /** Толщина обводки наружу в долях кегля; 0 — нет. */
+  strokeWidth: number;
+  /** Изгиб дугой −100…+100. */
+  arc: number;
+}
+
+/** Что и как рисовать: строка (прямой текст) или одна буква (дуга), точка — базовая линия. */
+export interface TextItem { text: string; x: number; y: number; rot: number }
+
 export interface TextBox {
   width: number;
   height: number;
-  /** Строки с точкой базовой линии относительно левого верхнего угла габарита. */
-  lines: Array<{ text: string; x: number; y: number }>;
+  /** Элементы с координатами относительно левого верхнего угла габарита. */
+  items: TextItem[];
+  /** true — элементы рисуются с выравниванием по центру точки (буквы на дуге), иначе по левому краю. */
+  centered: boolean;
+  /** Толщина обводки наружу, px. */
+  stroke: number;
 }
-
-/** Межстрочный шаг в долях кегля — как у текста Konva по умолчанию. */
-const LINE_HEIGHT = 1;
 
 let measureCtx: CanvasRenderingContext2D | null | undefined;
 const textCache = new Map<string, TextBox>();
 
-export const textFont = (fontFamily: string, fontPx: number) => `normal normal ${fontPx}px ${fontFamily}`;
+export const clearTextCache = () => textCache.clear();
 
-/** Габарит текста по буквам. Вне браузера — нулевой. */
-export function measureText(text: string, fontFamily: string, fontPx: number, align: 'left' | 'center' | 'right'): TextBox {
-  const key = `${fontFamily}|${fontPx}|${align}|${text}`;
+const FALLBACK = 'Arial, sans-serif';
+export const textFont = (st: Pick<TextStyle, 'fontFamily' | 'bold' | 'italic'>, fontPx: number) =>
+  `${st.italic ? 'italic' : 'normal'} ${st.bold ? 700 : 400} ${fontPx}px "${st.fontFamily}", ${FALLBACK}`;
+
+/** Предел угла дуги для самой длинной строки при изгибе 100: полукруг. */
+const MAX_SWEEP = Math.PI;
+
+/**
+ * Габарит текста по буквам (вместе с обводкой и изгибом). Единственный источник геометрии текста:
+ * по нему рисует холст, считаются сантиметры, формат и цена, снимается файл печати.
+ * Вне браузера — нулевой.
+ */
+export function measureText(text: string, st: TextStyle, fontPx: number): TextBox {
+  const empty: TextBox = { width: 0, height: 0, items: [], centered: false, stroke: 0 };
+  const key = `${st.fontFamily}|${st.bold}|${st.italic}|${st.align}|${st.lineHeight}|${st.strokeWidth}|${st.arc}|${fontPx}|${text}`;
   const hit = textCache.get(key);
   if (hit) return hit;
-  if (typeof document === 'undefined') return { width: 0, height: 0, lines: [] };
+  if (typeof document === 'undefined') return empty;
   if (measureCtx === undefined) measureCtx = document.createElement('canvas').getContext('2d');
-  if (!measureCtx) return { width: 0, height: 0, lines: [] };
+  if (!measureCtx) return empty;
   const ctx = measureCtx;
-  ctx.font = textFont(fontFamily, fontPx);
+  ctx.font = textFont(st, fontPx);
 
+  const stroke = st.strokeWidth * fontPx;
+  const step = fontPx * st.lineHeight;
   const rows = text.split('\n').map((t) => ({ t, m: ctx.measureText(t) }));
   const maxAdv = Math.max(0, ...rows.map((r) => r.m.width));
+  const arc = Math.max(-100, Math.min(100, st.arc));
+
+  const items: TextItem[] = [];
   let [minX, minY, maxX, maxY] = [Infinity, Infinity, -Infinity, -Infinity];
-  const placed = rows.map((r, i) => {
-    const x0 = align === 'left' ? 0 : align === 'center' ? (maxAdv - r.m.width) / 2 : maxAdv - r.m.width;
-    const base = i * fontPx * LINE_HEIGHT;
-    if (r.t.trim()) {
-      minX = Math.min(minX, x0 - r.m.actualBoundingBoxLeft);
-      maxX = Math.max(maxX, x0 + r.m.actualBoundingBoxRight);
-      minY = Math.min(minY, base - r.m.actualBoundingBoxAscent);
-      maxY = Math.max(maxY, base + r.m.actualBoundingBoxDescent);
-    }
-    return { text: r.t, x: x0, y: base };
-  });
+  const grow = (x: number, y: number) => {
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+  };
+
+  if (Math.abs(arc) < 1) {
+    rows.forEach((r, i) => {
+      const x0 = st.align === 'left' ? 0 : st.align === 'center' ? (maxAdv - r.m.width) / 2 : maxAdv - r.m.width;
+      const base = i * step;
+      items.push({ text: r.t, x: x0, y: base, rot: 0 });
+      if (r.t.trim()) {
+        grow(x0 - r.m.actualBoundingBoxLeft, base - r.m.actualBoundingBoxAscent);
+        grow(x0 + r.m.actualBoundingBoxRight, base + r.m.actualBoundingBoxDescent);
+      }
+    });
+  } else {
+    // Текст по дуге: самая длинная строка занимает |arc|% полукруга, остальные идут на концентрических дугах.
+    const up = arc > 0; // горбом вверх: центр круга ниже текста
+    const R = maxAdv / ((Math.abs(arc) / 100) * MAX_SWEEP);
+    rows.forEach((r, i) => {
+      const rho = up ? R - i * step : R + i * step;
+      if (rho <= fontPx * 0.2) return; // строки внутри круга, дальше центра, не рисуем
+      const lineW = r.m.width;
+      const lineStart = st.align === 'left' ? 0 : st.align === 'center' ? (maxAdv - lineW) / 2 : maxAdv - lineW;
+      // Позиция середины буквы вдоль дуги, считая от вершины (середины самой длинной строки).
+      let pos = lineStart - maxAdv / 2;
+      for (const ch of [...r.t]) {
+        const m = ctx.measureText(ch);
+        const mid = pos + m.width / 2;
+        pos += m.width;
+        if (!ch.trim()) continue;
+        const phi = mid / rho;
+        const px = rho * Math.sin(phi);
+        const py = up ? R - rho * Math.cos(phi) : -R + rho * Math.cos(phi);
+        const rot = up ? phi : -phi;
+        items.push({ text: ch, x: px, y: py, rot });
+        // Прямоугольник буквы, повёрнутый вместе с ней.
+        const [cos, sin] = [Math.cos(rot), Math.sin(rot)];
+        for (const [cx, cy] of [
+          [-m.width / 2, -m.actualBoundingBoxAscent], [m.width / 2, -m.actualBoundingBoxAscent],
+          [m.width / 2, m.actualBoundingBoxDescent], [-m.width / 2, m.actualBoundingBoxDescent],
+        ]) grow(px + cx * cos - cy * sin, py + cx * sin + cy * cos);
+      }
+    });
+  }
 
   let box: TextBox;
   if (minX === Infinity) {
     // Пустая надпись: оставляем рамку, за которую её можно взять.
-    box = { width: fontPx * 0.5, height: fontPx, lines: [] };
+    box = { width: fontPx * 0.5, height: fontPx, items: [], centered: false, stroke };
   } else {
+    // Обводка выходит за буквы на свою толщину.
+    minX -= stroke; minY -= stroke; maxX += stroke; maxY += stroke;
     box = {
       width: maxX - minX,
       height: maxY - minY,
-      lines: placed.map((l) => ({ text: l.text, x: l.x - minX, y: l.y - minY })),
+      items: items.map((l) => ({ ...l, x: l.x - minX, y: l.y - minY })),
+      centered: Math.abs(arc) >= 1,
+      stroke,
     };
   }
   if (textCache.size > 500) textCache.clear();

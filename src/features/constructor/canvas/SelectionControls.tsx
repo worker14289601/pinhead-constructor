@@ -31,13 +31,15 @@ interface Props {
   minPx: number;
   /** Цвет «ножки» — контрастный к ткани. */
   accent: string;
+  /** Подпись под рамкой: размер принта и формат. */
+  caption?: string;
   onCommit: (patch: Partial<DesignLayer>) => void;
   onRemove: () => void;
   onDuplicate: () => void;
 }
 
 interface Pt { x: number; y: number }
-interface Geo { top: Pt; rotate: Pt; resize: Pt; remove: Pt; duplicate: Pt }
+interface Geo { top: Pt; rotate: Pt; resize: Pt; remove: Pt; duplicate: Pt; label: Pt }
 
 type Gesture =
   | { mode: 'rotate'; center: Pt; startAngle: number; rotation0: number }
@@ -75,10 +77,15 @@ function geometry(node: Konva.Node, size: { w: number; h: number }): Geo {
     x: Math.min(size.w - BTN / 2, Math.max(BTN / 2, p.x)),
     y: Math.min(size.h - BTN / 2, Math.max(BTN / 2, p.y)),
   });
+  const box = node.getClientRect({ skipShadow: true, skipStroke: true });
+  const resize = clamp(turn(t.point({ x: w, y: h }), OUT, OUT));
+  // Бейдж — под кнопкой размера, а не под самим принтом: на узком рукаве он иначе налезал бы на неё.
+  const below = Math.max(box.y + box.height + 12, resize.y + BTN / 2 + 8);
   return {
     top,
+    label: { x: Math.min(size.w - 40, Math.max(40, box.x + box.width / 2)), y: Math.min(size.h - 14, below) },
     rotate: clamp(turn(top, 0, -STEM)),
-    resize: clamp(turn(t.point({ x: w, y: h }), OUT, OUT)),
+    resize,
     remove: clamp(turn(t.point({ x: w, y: 0 }), OUT, -OUT)),
     duplicate: clamp(turn(t.point({ x: 0, y: 0 }), -OUT, -OUT)),
   };
@@ -86,7 +93,7 @@ function geometry(node: Konva.Node, size: { w: number; h: number }): Geo {
 
 const same = (a: Geo | null, b: Geo | null) => JSON.stringify(a) === JSON.stringify(b);
 
-export function SelectionControls({ stage, layer, area, size, minPx, accent, onCommit, onRemove, onDuplicate }: Props) {
+export function SelectionControls({ stage, layer, area, size, minPx, accent, caption, onCommit, onRemove, onDuplicate }: Props) {
   const [geo, setGeo] = useState<Geo | null>(null);
   const [, bump] = useReducer((n: number) => n + 1, 0);
   const gesture = useRef<Gesture | null>(null);
@@ -175,6 +182,7 @@ export function SelectionControls({ stage, layer, area, size, minPx, accent, onC
       <svg className={c.stem} width={size.w} height={size.h} aria-hidden>
         <line x1={geo.top.x} y1={geo.top.y} x2={geo.rotate.x} y2={geo.rotate.y} stroke={accent} />
       </svg>
+      {caption && <div className={c.caption} style={at(geo.label)}>{caption}</div>}
       <button type="button" className={c.btn} style={at(geo.rotate)} aria-label="Повернуть" title="Повернуть" {...handlers('rotate')}>
         <svg viewBox="0 0 24 24" aria-hidden><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8" /><path d="M21 3v5h-5" /></svg>
       </button>
