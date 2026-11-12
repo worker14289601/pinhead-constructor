@@ -12,7 +12,7 @@ import { fontReady } from '../model/fonts';
 import { selectGarment, selectVariant, useConstructor } from '../model/store';
 import { isSleeve, type Side } from '../model/types';
 import { alignLayer, snapToCenter, type AlignMode } from './align';
-import { LayerNode } from './LayerNode';
+import { DESIGN_NODE, LayerNode } from './LayerNode';
 import { SelectionControls } from './SelectionControls';
 import c from './controls.module.css';
 import { SILHOUETTES, SILHOUETTE_VIEWBOX } from './silhouettes';
@@ -24,8 +24,8 @@ export interface DesignStageHandle {
   /** PNG текущей стороны с изделием — превью для клиента и менеджера. */
   exportPreview: () => string | null;
   /**
-   * PNG принта (без изделия, прозрачный фон) по реальной ширине зоны: 300 dpi,
-   * для самых больших зон — меньше, чтобы файл уложился в предел размера canvas.
+   * PNG принта (без изделия, прозрачный фон), обрезанный по габариту рисунка: 300 dpi,
+   * для принтов почти во всю большую зону — меньше, чтобы файл уложился в предел размера canvas.
    */
   exportPrint: () => { dataUrl: string; dpi: number } | null;
   /** Ждёт, пока холст покажет текущую сторону целиком: мокап и все картинки слоёв загружены. */
@@ -316,14 +316,27 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom }: {
       // toDataURL берёт область в координатах экрана — с учётом приближения холста.
       const w = area.w * view.k;
       const h = area.h * view.k;
-      // Файл для печати — без складок ткани.
       const full = targetPx / w;
-      const ratio = Math.min(full, Math.sqrt(MAX_EXPORT_AREA / (w * h)));
-      const dataUrl = withHidden([shadeRef.current, trRef.current], () => unpanned(() => {
+      // Файл для печати — без складок ткани и только по самому рисунку: пустая часть зоны в файл не идёт,
+      // поэтому предел площади canvas почти всегда оставляет полные 300 dpi.
+      const out = withHidden([shadeRef.current, trRef.current], () => unpanned(() => {
         const at = g.getAbsolutePosition();
-        return g.toDataURL({ x: at.x, y: at.y, width: w, height: h, pixelRatio: ratio });
+        let [x1, y1, x2, y2] = [Infinity, Infinity, -Infinity, -Infinity];
+        for (const n of g.find(`.${DESIGN_NODE}`)) {
+          const r = n.getClientRect();
+          x1 = Math.min(x1, r.x); y1 = Math.min(y1, r.y);
+          x2 = Math.max(x2, r.x + r.width); y2 = Math.max(y2, r.y + r.height);
+        }
+        // За границей зоны рисунок обрезается — габарит тоже.
+        x1 = Math.max(x1, at.x); y1 = Math.max(y1, at.y);
+        x2 = Math.min(x2, at.x + w); y2 = Math.min(y2, at.y + h);
+        // Рисунок целиком за зоной — отдаём всю зону (пустую), чтобы заявка не споткнулась.
+        if (!(x2 > x1 && y2 > y1)) [x1, y1, x2, y2] = [at.x, at.y, at.x + w, at.y + h];
+        const ratio = Math.min(full, Math.sqrt(MAX_EXPORT_AREA / ((x2 - x1) * (y2 - y1))));
+        const dataUrl = g.toDataURL({ x: x1, y: y1, width: x2 - x1, height: y2 - y1, pixelRatio: ratio });
+        return { dataUrl, dpi: Math.round((DPI * ratio) / full) };
       }));
-      return { dataUrl, dpi: Math.round((DPI * ratio) / full) };
+      return out;
     },
     whenReady: (timeoutMs = 8000) =>
       new Promise<void>((resolve, reject) => {
