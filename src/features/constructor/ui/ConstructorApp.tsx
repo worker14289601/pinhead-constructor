@@ -254,7 +254,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
   const hasDesign = st.layers.some((l) => sides.includes(l.side));
   const openOrder = () => {
     if (!hasDesign) return setTab('design');
-    if (!price?.qty) return setTab('order');
+    if (!price?.qty) { setTab('order'); return finishTo('order'); }
     setOrderOpen(true);
     track('order_form_open');
   };
