@@ -87,32 +87,46 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
   const [zoomed, setZoomed] = useState(false);
   const started = useRef(false);
   const touchX = useRef(0); // свайп в увеличенном просмотре
+  // Снимки по цветам: клик по строке цвета в сводке показывает превью этого цвета.
+  const [active, setActive] = useState(variant.productId);
+  const cache = useRef(new Map<string, Array<{ side: Side; src: string }>>());
+  const shoot = async (productId: string) => {
+    const cached = cache.current.get(productId);
+    if (cached) { setShots(cached); return; }
+    setCapturing(true);
+    const sides = sidesFor(garment).filter((sd) => layers.some((l) => l.side === sd));
+    const out: Array<{ side: Side; src: string }> = [];
+    stage.current?.setTurnEnabled(false);
+    try {
+      if (productId !== variant.productId) selectVariant(productId);
+      for (const sd of sides) {
+        setSide(sd);
+        if (!stage.current) break;
+        await stage.current.whenReady();
+        const src = stage.current.exportPreview();
+        if (src) { out.push({ side: sd, src }); setShots([...out]); }
+      }
+      if (out.length) cache.current.set(productId, out);
+    } catch {
+      // Без превью заявку всё равно можно отправить.
+    } finally {
+      setSide(side);
+      stage.current?.setTurnEnabled(true);
+      setCapturing(false);
+    }
+  };
   useEffect(() => {
     if (started.current) return; // StrictMode вызывает эффект дважды
     started.current = true;
-    (async () => {
-      const sides = sidesFor(garment).filter((sd) => layers.some((l) => l.side === sd));
-      const out: Array<{ side: Side; src: string }> = [];
-      stage.current?.setTurnEnabled(false);
-      try {
-        for (const sd of sides) {
-          setSide(sd);
-          if (!stage.current) break;
-          await stage.current.whenReady();
-          const src = stage.current.exportPreview();
-          if (src) { out.push({ side: sd, src }); setShots([...out]); }
-        }
-      } catch {
-        // Без превью заявку всё равно можно отправить.
-      } finally {
-        setSide(side);
-        stage.current?.setTurnEnabled(true);
-        setCapturing(false);
-      }
-    })();
+    void shoot(variant.productId);
     // Снимки — один раз при открытии.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const pick = (productId: string) => {
+    if (capturing || productId === active) return;
+    setActive(productId);
+    void shoot(productId);
+  };
   const cur = shots[Math.min(shot, shots.length - 1)];
   const flip = (d: number) => setShot((i) => (i + d + shots.length) % shots.length);
 
@@ -281,7 +295,7 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
                   {cur ? (
                     <button type="button" className={f.shotBtn} onClick={() => setZoomed(true)} aria-label="Увеличить превью">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img className={f.preview} src={cur.src} alt={`Превью: ${SIDE_LABEL[cur.side].toLowerCase()}`} />
+                      <img key={cur.src} className={f.preview} src={cur.src} alt={`Превью: ${SIDE_LABEL[cur.side].toLowerCase()}`} />
                     </button>
                   ) : (
                     <div className={`${f.preview} ${f.previewStub}`} aria-hidden />
@@ -299,7 +313,7 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
                   )}
                   {cur && (
                     <button type="button" className={f.zoomBtn} onClick={() => setZoomed(true)} aria-label="Увеличить" title="Увеличить">
-                      <Icon name="expand" size={18} />
+                      <Icon name="zoomIn" />
                     </button>
                   )}
                 </div>
@@ -312,13 +326,27 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
                 </div>
               </div>
               <ul className={f.lines}>
-                {price.lines.map((l) => (
-                  <li key={l.productId} className={f.line}>
-                    <i style={{ background: l.hex }} />
-                    <span className={f.lineName}>{l.color}<small>{l.sizes.map(([k, n]) => `${k}×${n}`).join(', ')}</small></span>
-                    <span className={f.lineSum}>{l.qty} шт<small>{rub(l.total)}</small></span>
-                  </li>
-                ))}
+                {price.lines.map((l) => {
+                  const body = (
+                    <>
+                      <i style={{ background: l.hex }} />
+                      <span className={f.lineName}>{l.color}<small>{l.sizes.map(([k, n]) => `${k}×${n}`).join(', ')}</small></span>
+                      <span className={f.lineSum}>{l.qty} шт<small>{rub(l.total)}</small></span>
+                    </>
+                  );
+                  return (
+                    <li key={l.productId}>
+                      {price.lines.length > 1 ? (
+                        <button
+                          type="button" className={f.line} aria-pressed={l.productId === active} disabled={capturing}
+                          onClick={() => pick(l.productId)} title={`Показать превью: ${l.color}`}
+                        >{body}</button>
+                      ) : (
+                        <div className={f.line}>{body}</div>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
               <div className={f.total}>
                 <span>Итого · {price.qty} шт</span>

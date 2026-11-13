@@ -49,9 +49,11 @@
 .arrowR { right: 8px; }
 .zoomBtn {
   position: absolute; right: 8px; bottom: 8px; width: 34px; height: 34px; display: grid; place-items: center; padding: 0;
-  border: 1px solid var(--ink); border-radius: var(--r-ctl); background: #fff; cursor: pointer;
+  border: 0; border-radius: 50%; background: var(--ink); color: #fff; cursor: pointer;
+  box-shadow: 0 1px 4px rgb(0 0 0 / .2);
 }
-.zoomBtn:hover { background: var(--lime); }
+.zoomBtn svg { width: 18px; height: 18px; }
+.zoomBtn:hover { background: var(--lime); color: var(--ink); }
 
 /* Увеличенный просмотр поверх окна заявки */
 .zoom {
@@ -76,8 +78,14 @@
 
 .lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .line {
-  display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: #fff; font-size: 14px;
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 1px solid transparent; border-radius: 10px;
+  background: #fff; font: inherit; font-size: 14px; color: inherit; text-align: left;
 }
+/* Несколько цветов — строка переключает превью на этот цвет. */
+button.line { cursor: pointer; transition: border-color .2s; }
+button.line[aria-pressed='false']:hover:not(:disabled) { border-color: var(--line); }
+button.line[aria-pressed='true'] { border-color: var(--ink); }
+button.line:disabled { cursor: progress; }
 .line i { width: 18px; height: 18px; flex: none; border-radius: 50%; box-shadow: inset 0 0 0 1px rgb(0 0 0 / .25); }
 .lineName, .lineSum { display: flex; flex-direction: column; line-height: 1.25; }
 .lineName { flex: 1; min-width: 0; font-weight: 700; }
@@ -166,7 +174,8 @@
   .total b { font-size: 20px; }
   .preview { border-radius: 10px; }
   .gallery .arrow, .gallery .shotSide { display: none; }
-  .zoomBtn { right: 3px; bottom: 3px; width: 22px; height: 22px; padding: 3px; }
+  .zoomBtn { right: 4px; bottom: 4px; width: 22px; height: 22px; }
+  .zoomBtn svg { width: 13px; height: 13px; }
   .zoom { padding: 12px; }
   .zoomFig { padding: 12px 8px; }
   .zoomFig img { width: calc(100vw - 40px); }
