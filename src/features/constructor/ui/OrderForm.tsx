@@ -20,8 +20,8 @@ interface Props {
   variant: GarmentVariant;
   price: PriceBreakdown;
   stage: RefObject<DesignStageHandle>;
-  /** POST {endpoint}/number — выдать номер заказа, POST {endpoint} — принять заявку. */
-  endpoint: string;
+  /** POST {endpoint}/number — выдать номер заказа, POST {endpoint} — принять заявку. null — демо без сервера. */
+  endpoint: string | null;
   onClose: () => void;
 }
 
@@ -63,6 +63,16 @@ function download(blob: Blob, name: string) {
 }
 
 /** Оформление заявки: контакты, номер заказа, PDF. Без онлайн-оплаты. */
+/** Номер для демо без сервера — того же вида, что выдаёт сервер: PH-ММДД-XXXX. */
+function demoNumber(): string {
+  const abc = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+  const d = new Date();
+  const mmdd = String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
+  let tail = '';
+  for (let i = 0; i < 4; i++) tail += abc[Math.floor(Math.random() * abc.length)];
+  return `PH-${mmdd}-${tail}`;
+}
+
 export function OrderForm({ garment, variant, price, stage, endpoint, onClose }: Props) {
   const { method, side, setSide, selectVariant, layers } = useConstructor();
   const [c, setC] = useState<OrderContacts>(EMPTY);
@@ -147,9 +157,12 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
     track('order_send', { total: price.total, qty: price.qty });
     try {
       // Номер выдаёт сервер до отправки: он нужен в PDF, который уходит вместе с заявкой.
-      const numRes = await fetch(`${endpoint}/number`, { method: 'POST' });
-      const number = numRes.ok ? String((await numRes.json()).number ?? '') : '';
-      if (!number) throw new Error(`number_${numRes.status}`);
+      let number = demoNumber();
+      if (endpoint) {
+        const numRes = await fetch(`${endpoint}/number`, { method: 'POST' });
+        number = numRes.ok ? String((await numRes.json()).number ?? '') : '';
+        if (!number) throw new Error(`number_${numRes.status}`);
+      }
 
       // Снимаем превью по каждому цвету и стороне с принтом; файл печати от цвета ткани не зависит — один на сторону.
       const form = new FormData();
@@ -208,10 +221,13 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
         utm: getUtm(),
         page: window.location.href.split('?')[0],
       }));
-      const res = await fetch(endpoint, { method: 'POST', body: form });
-      if (!res.ok) throw new Error(String(res.status));
-      // Сервер мог выдать другой номер, если присланный ему не подошёл.
-      const saved = String((await res.json().catch(() => ({}))).number ?? number);
+      let saved = number;
+      if (endpoint) {
+        const res = await fetch(endpoint, { method: 'POST', body: form });
+        if (!res.ok) throw new Error(String(res.status));
+        // Сервер мог выдать другой номер, если присланный ему не подошёл.
+        saved = String((await res.json().catch(() => ({}))).number ?? number);
+      }
       setDone({ number: saved, pdf });
       setState('done');
       track('order_success', { order_price: price.total, currency: 'RUB', product: garment.name });
@@ -244,6 +260,7 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
             <p className={f.doneLead}>Номер заказа — назовите его менеджеру:</p>
             <p className={s.orderNumber}>{done.number}</p>
             <ol className={f.steps}>{NEXT_STEPS.map((x) => <li key={x}>{x}</li>)}</ol>
+            {!endpoint && <p className={f.doneLead}>Демо-версия: заявка никуда не отправлена.</p>}
             <div className={f.doneActions}>
               <button
                 type="button" className={s.btn}

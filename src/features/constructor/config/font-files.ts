@@ -3,10 +3,12 @@
  * без Google Fonts. Начертание разбито по unicode-range: браузер скачивает только нужные куски.
  * Лицензии — public/fonts/constructor/licenses/ (SIL OFL 1.1). Список сгенерирован из Google Fonts CSS API.
  */
+import { BASE_PATH } from './base-path';
+
 export interface FontFile { family: string; style: string; weight: string; unicodeRange: string; file: string }
 
 /** Откуда грузить файлы. При переносе конструктора — скопировать папку public/fonts/constructor/ или поменять путь. */
-export const FONT_BASE_URL = '/fonts/constructor/';
+export const FONT_BASE_URL = `${BASE_PATH}/fonts/constructor/`;
 
 export const FONT_FILES: FontFile[] = [
   { family: 'Roboto', style: 'italic', weight: '400', file: 'roboto-b209c2f4.woff2', unicodeRange: 'U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F' },

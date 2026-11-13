@@ -1,4 +1,5 @@
 import type { GarmentType, PrintArea, Side } from '../model/types';
+import { BASE_PATH } from './base-path';
 
 /**
  * Плоские мокапы изделий: серые фото (яркость 128 = основной цвет ткани), которые
@@ -21,7 +22,7 @@ export interface GarmentShape {
 const area = (x: number, y: number, w: number, h: number, widthCm: number): PrintArea => ({
   x: x / FRAME.w, y: y / FRAME.h, width: w / FRAME.w, height: h / FRAME.h, widthCm,
 });
-const img = (name: string) => `/mockups/${name}.png`;
+const img = (name: string) => `${BASE_PATH}/mockups/${name}.png`;
 /**
  * Мокапы рукавов — кадр 1200×1380 (3× от логического). Рукава — на виде сбоку: `<name>_side` — левый бок (перед изделия смотрит влево), `<name>_side_r` — тот же снимок
  * зеркально для правого рукава.

@@ -56,8 +56,11 @@ const SumRow = ({ title, meta, onClick }: { title: string; meta: string; onClick
 type Tab = 'garment' | 'design' | 'layers' | 'order';
 const TABS: Array<[Tab, string]> = [['garment', 'Изделие'], ['design', 'Дизайн'], ['layers', 'Слои'], ['order', 'Размеры']];
 
-/** ordersEndpoint — куда уходит заявка: POST {endpoint}/number выдаёт номер, POST {endpoint} принимает заявку. */
-export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpoint?: string }) {
+/**
+ * ordersEndpoint — куда уходит заявка: POST {endpoint}/number выдаёт номер, POST {endpoint} принимает заявку.
+ * null — демо без сервера: номер выдаётся в браузере, заявка никуда не отправляется (экран успеха и PDF работают).
+ */
+export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpoint?: string | null }) {
   const st = useConstructor();
   const garment = useConstructor(selectGarment);
   const variant = useConstructor(selectVariant);
