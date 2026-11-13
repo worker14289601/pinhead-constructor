@@ -110,8 +110,10 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = fal
   const [turn, setTurn] = useState<{ id: number; snap: HTMLCanvasElement; from: Side; to: Side } | null>(null);
   const turnRef = useRef<HTMLDivElement>(null);
   const turnEnabled = useRef(true);
-  // Кроссфейд при смене изделия и цвета: снимок прежнего кадра растворяется поверх нового.
-  const [fade, setFade] = useState<{ id: number; snap: HTMLCanvasElement; base: unknown } | null>(null);
+  // Смена цвета: снимок прежнего кадра растворяется поверх нового (силуэт тот же).
+  // Смена изделия (swap): силуэты разные, наложение даёт «двойное» изделие — поэтому прежний кадр
+  // сначала гаснет, и только потом проявляется новый.
+  const [fade, setFade] = useState<{ id: number; snap: HTMLCanvasElement; base: unknown; swap: boolean } | null>(null);
   const fadeRef = useRef<HTMLDivElement>(null);
   // Появление новых слоёв: id, которые уже встречались (отмена/повтор/черновик не в счёт), ожидающие и идущие.
   const seenIds = useRef(new Set<string>());
@@ -216,7 +218,7 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = fal
     hidden.forEach((n) => n.visible(false));
     let snap: HTMLCanvasElement;
     try { snap = stage.toCanvas({ pixelRatio: Math.min(2, window.devicePixelRatio || 1) }); } finally { hidden.forEach((n) => n.visible(true)); }
-    setFade({ id: Date.now(), snap, base: mockupRef.current });
+    setFade({ id: Date.now(), snap, base: mockupRef.current, swap: st.garmentId !== prev.garmentId });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), []);
 
@@ -227,18 +229,29 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = fal
     fade.snap.style.width = '100%';
     fade.snap.style.height = '100%';
     holder.replaceChildren(fade.snap);
+    // Новое изделие не показываем под снимком прежнего: оно проявится, когда снимок погаснет.
+    const content = fade.swap ? stageRef.current?.content : undefined;
+    if (content) content.style.opacity = '0';
     let alive = true;
     let anim: Animation | null = null;
     let timer = 0;
     const started = Date.now();
+    const done = () => alive && setFade((f) => (f?.id === fade.id ? null : f));
     const go = () => {
       if (!alive) return;
       stageRef.current?.draw();
       // Дать браузеру показать новый кадр под снимком, затем растворить снимок.
       timer = window.setTimeout(() => {
         if (!alive) return;
-        anim = holder.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 400, easing: 'cubic-bezier(.3,.1,.3,1)', fill: 'forwards' });
-        anim.finished.then(() => alive && setFade((f) => (f?.id === fade.id ? null : f)), () => {});
+        anim = holder.animate([{ opacity: 1 }, { opacity: 0 }], { duration: content ? 200 : 400, easing: 'cubic-bezier(.3,.1,.3,1)', fill: 'forwards' });
+        anim.finished.then(() => {
+          if (!alive) return;
+          if (content) {
+            content.style.opacity = '';
+            content.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 260, easing: 'cubic-bezier(.25,.8,.25,1)' });
+          }
+          done();
+        }, () => {});
       }, 50);
     };
     const wait = () => {
@@ -248,8 +261,11 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = fal
     };
     wait();
     // Страховка: фоновая вкладка не гонит анимации — снимок не должен зависнуть.
-    const guard = window.setTimeout(() => alive && setFade((f) => (f?.id === fade.id ? null : f)), 2500);
-    return () => { alive = false; clearTimeout(timer); clearTimeout(guard); anim?.cancel(); };
+    const guard = window.setTimeout(done, 2500);
+    return () => {
+      alive = false; clearTimeout(timer); clearTimeout(guard); anim?.cancel();
+      if (content) content.style.opacity = '';
+    };
   }, [fade]);
 
   // Холст тянется по контейнеру с пропорциями кадра 400×460.
@@ -803,7 +819,7 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = fal
       </Stage>
       {turn && <div ref={turnRef} className={c.turn} aria-hidden />}
       {fade && <div ref={fadeRef} className={c.turn} aria-hidden />}
-      {area && !turn && empty && sideLayers.length === 0 && (
+      {area && !turn && !fade?.swap && empty && sideLayers.length === 0 && (
         <EmptyZone
           rect={{ left: area.x * view.k + view.x, top: area.y * view.k + view.y, width: area.w * view.k, height: area.h * view.k }}
           dragging={empty.dragging}
@@ -815,14 +831,14 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = fal
           onUpload={empty.onUpload}
         />
       )}
-      {area && !turn && !isEmptyZone && selectedLayer && zoneText && (
+      {area && !turn && !fade?.swap && !isEmptyZone && selectedLayer && zoneText && (
         <ZoneBadge
           rect={{ left: area.x * view.k + view.x, top: area.y * view.k + view.y, width: area.w * view.k, height: area.h * view.k }}
           text={zoneText}
           corner="bottom"
         />
       )}
-      {area && !turn && (
+      {area && !turn && !fade?.swap && (
         <SelectionControls
           stage={stageRef.current}
           layer={selectedLayer}
