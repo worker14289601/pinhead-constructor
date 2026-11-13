@@ -14,6 +14,8 @@ const AZIMUTH: Record<Side, number> = { front: 0, sleeve_left: 90, back: 180, sl
 const QUARTER_MS = 480;
 const HALF_MS = 580;
 const SAFETY_MS = 400;
+/** Сколько ждать загрузки новой стороны на ребре поворота, мс. */
+const MAX_HOLD_MS = 1500;
 const PERSPECTIVE = 'perspective(1000px)';
 const EASING = 'cubic-bezier(.45,.05,.25,1)';
 
@@ -37,7 +39,14 @@ type Frame = Keyframe & { offset: number };
  * Запускает поворот: `oldEl` — снимок прежней стороны (поверх холста), `newEl` — контейнер холста.
  * Возвращает отмену и обещание конца анимации (завершается и по страховочному таймеру).
  */
-export function playTurn(oldEl: HTMLElement, newEl: HTMLElement, sign: 1 | -1, half: boolean) {
+export function playTurn(
+  oldEl: HTMLElement,
+  newEl: HTMLElement,
+  sign: 1 | -1,
+  half: boolean,
+  /** Новая сторона готова (мокап и картинки загружены); `draw` — синхронно дорисовать холст. До этого ребро не проходим. */
+  gate?: { ready: () => boolean; draw: () => void },
+) {
   const D = half ? HALF_MS : QUARTER_MS;
   const EDGE = 88;
   // Один непрозрачный слой в каждый момент: прежняя сторона доворачивается до ребра и исчезает,
@@ -70,6 +79,7 @@ export function playTurn(oldEl: HTMLElement, newEl: HTMLElement, sign: 1 | -1, h
   const timers: number[] = [];
 
   let done = false;
+  let raf = 0;
   let resolveFinish: () => void = () => {};
   const finished = new Promise<void>((r) => { resolveFinish = r; });
 
@@ -77,16 +87,43 @@ export function playTurn(oldEl: HTMLElement, newEl: HTMLElement, sign: 1 | -1, h
     if (done) return;
     done = true;
     timers.forEach(clearTimeout);
+    cancelAnimationFrame(raf);
+    // cancel() возвращает элементу обычный вид (opacity 1) — прежняя сторона мигнула бы до удаления снимка.
+    oldEl.style.visibility = 'hidden';
     out.cancel();
     inn.cancel();
   };
+
+  // Ребро (середина анимации): если новая сторона ещё грузится, ждём на нём, а не показываем прежний мокап.
+  const edgeMs = D * 0.49;
+  let held = false;
+  let heldAt = 0;
+  const watch = () => {
+    if (done) return;
+    if (!held && gate && Number(inn.currentTime ?? 0) >= edgeMs && !gate.ready()) {
+      held = true;
+      heldAt = Date.now();
+      inn.currentTime = edgeMs; out.currentTime = edgeMs;
+      inn.pause(); out.pause();
+    }
+    // Картинка могла не загрузиться — на ребре ждём не дольше MAX_HOLD_MS, иначе холст остался бы пустым.
+    if (held && (gate!.ready() || Date.now() - heldAt > MAX_HOLD_MS)) {
+      held = false;
+      gate!.draw();
+      // Дать Konva выложить кадр, и только потом выходить из ребра.
+      requestAnimationFrame(() => requestAnimationFrame(() => { if (!done) { inn.play(); out.play(); } }));
+      return;
+    }
+    raf = requestAnimationFrame(watch);
+  };
+  if (gate) raf = requestAnimationFrame(watch);
 
   const finish = () => { cleanup(); resolveFinish(); };
   inn.finished.then(finish, () => {});
   // Страховка: вкладка в фоне или анимацию отменили снаружи — слой снимка не должен зависнуть.
   const guard = () => {
     // Поставленную на паузу (отладка) не трогаем.
-    if (inn.playState === 'paused') timers.push(window.setTimeout(guard, SAFETY_MS));
+    if (inn.playState === 'paused' || held) timers.push(window.setTimeout(guard, SAFETY_MS));
     else finish();
   };
   timers.push(window.setTimeout(guard, D + SAFETY_MS));

@@ -9,6 +9,7 @@ import { type Garment, type GarmentVariant, type OrderContacts, type Side } from
 import type { DesignStageHandle } from '../canvas/DesignStage';
 import { buildOrderPdf } from '../pdf/orderPdf';
 import s from './constructor.module.css';
+import { useDismiss } from './useDismiss';
 
 interface Props {
   garment: Garment;
@@ -40,8 +41,9 @@ function download(blob: Blob, name: string) {
 
 /** Оформление заявки: контакты, номер заказа, PDF. Без онлайн-оплаты. */
 export function OrderForm({ garment, variant, price, stage, endpoint, onClose }: Props) {
-  const { method, sizes, side, setSide, layers } = useConstructor();
+  const { method, side, setSide, selectVariant, layers } = useConstructor();
   const [c, setC] = useState<OrderContacts>(EMPTY);
+  const { leaving, dismiss } = useDismiss();
   const [state, setState] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
   const [done, setDone] = useState<{ number: string; pdf: Blob } | null>(null);
   const field = (k: keyof OrderContacts) => (e: { target: { value: string } }) => setC({ ...c, [k]: e.target.value });
@@ -56,29 +58,35 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
       const number = numRes.ok ? String((await numRes.json()).number ?? '') : '';
       if (!number) throw new Error(`number_${numRes.status}`);
 
-      // Снимаем превью и файлы печати по каждой стороне с принтом.
+      // Снимаем превью по каждому цвету и стороне с принтом; файл печати от цвета ткани не зависит — один на сторону.
       const form = new FormData();
-      const sides = sidesFor(garment);
-      const previews: Array<{ side: Side; dataUrl: string }> = [];
-      const original = side;
+      const sides = sidesFor(garment).filter((sd) => layers.some((l) => l.side === sd));
+      const previews: Array<{ color: string; side: Side; dataUrl: string }> = [];
+      const original = { side, variantId: variant.productId };
       stage.current?.setTurnEnabled(false);
       try {
-        for (const sd of sides) {
-          if (!layers.some((l) => l.side === sd)) continue;
-          setSide(sd);
-          // Снимок — только когда холст показал эту сторону и загрузил её картинки.
-          if (!stage.current) throw new Error('canvas_missing');
-          await stage.current.whenReady();
-          // Холст перерисовался — берём его методы заново: прежние помнят зону прошлой стороны.
-          const preview = stage.current.exportPreview();
-          const print = stage.current.exportPrint();
-          if (!preview || !print) throw new Error('export_failed');
-          previews.push({ side: sd, dataUrl: preview });
-          form.append(`preview_${sd}`, await toPng(preview), `preview_${sd}.png`);
-          form.append(`print_${sd}`, await toPng(print.dataUrl), `print_${sd}_${print.dpi}dpi.png`);
+        for (const [i, line] of price.lines.entries()) {
+          selectVariant(line.productId);
+          for (const sd of sides) {
+            setSide(sd);
+            // Снимок — только когда холст показал этот цвет и сторону и загрузил их картинки.
+            if (!stage.current) throw new Error('canvas_missing');
+            await stage.current.whenReady();
+            // Холст перерисовался — берём его методы заново: прежние помнят зону прошлой стороны.
+            const preview = stage.current.exportPreview();
+            if (!preview) throw new Error('export_failed');
+            previews.push({ color: line.color, side: sd, dataUrl: preview });
+            form.append(`preview_${i}_${sd}`, await toPng(preview), `preview_${i}_${sd}.png`);
+            if (i === 0) {
+              const print = stage.current.exportPrint();
+              if (!print) throw new Error('export_failed');
+              form.append(`print_${sd}`, await toPng(print.dataUrl), `print_${sd}_${print.dpi}dpi.png`);
+            }
+          }
         }
       } finally {
-        setSide(original);
+        selectVariant(original.variantId);
+        setSide(original.side);
         stage.current?.setTurnEnabled(true);
       }
 
@@ -89,17 +97,18 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
       for (const [src, name] of images) form.append(`original_${i++}`, await (await fetch(src)).blob(), name);
 
       const contacts: OrderContacts = { ...c, name: c.name.trim(), phone: c.phone.trim(), email: c.email.trim(), city: c.city.trim() };
-      const sizeList = Object.entries(sizes).filter(([, q]) => q > 0);
       const pdf = await buildOrderPdf({
-        number, createdAt: new Date(), garment: garment.name, color: variant.colorName, method,
-        sizes: sizeList, price, contacts, previews, fileNames: [...images.values()],
+        number, createdAt: new Date(), garment: garment.name, method, price, contacts, previews, fileNames: [...images.values()],
       });
       form.append('order_pdf', pdf, `order_${number}.pdf`);
 
       form.append('order', JSON.stringify({
         number,
-        garment: { id: garment.id, name: garment.name, productId: variant.productId, color: variant.colorName },
-        method, sizes, price, contacts,
+        garment: { id: garment.id, name: garment.name },
+        method,
+        lines: price.lines.map((l) => ({ productId: l.productId, color: l.color, sizes: Object.fromEntries(l.sizes), perItem: l.perItem })),
+        price: { sides: price.lines[0]?.sides ?? [], total: price.total },
+        contacts,
         utm: getUtm(),
         page: window.location.href.split('?')[0],
       }));
@@ -111,8 +120,8 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
       setState('done');
       track('order_success', { order_price: price.total, currency: 'RUB', product: garment.name });
       trackPurchase({
-        number: saved, total: price.total, perItem: price.perItem, qty: price.qty,
-        productId: variant.productId, name: garment.name, color: variant.colorName,
+        number: saved, total: price.total, name: garment.name,
+        items: price.lines.map((l) => ({ productId: l.productId, color: l.color, perItem: l.perItem, qty: l.qty })),
       });
     } catch (err) {
       setState('error');
@@ -121,11 +130,11 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
   };
 
   return (
-    <div className={s.modalBg} onClick={() => state !== 'sending' && onClose()}>
+    <div className={s.modalBg} data-leaving={leaving || undefined} onClick={() => state !== 'sending' && dismiss(onClose)}>
       <form className={s.modal} onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         {state === 'done' && done ? (
           <>
-            <h3>Заявка отправлена</h3>
+            <h3 className={s.reveal}>Заявка отправлена</h3>
             <p className={s.muted}>Номер заказа</p>
             <p className={s.orderNumber}>{done.number}</p>
             <p>Менеджер свяжется с вами, проверит макет и подтвердит стоимость. Назовите ему этот номер.</p>
@@ -135,12 +144,12 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
             >
               Скачать PDF заказа
             </button>
-            <button type="button" className={s.cta} onClick={onClose}>Готово</button>
+            <button type="button" className={s.cta} onClick={() => dismiss(onClose)}>Готово</button>
           </>
         ) : (
           <>
             <h3>Оформление заявки</h3>
-            <p className={s.muted}>{garment.name}, {variant.colorName} · {price.qty} шт · {price.total.toLocaleString('ru-RU')} ₽</p>
+            <p className={s.muted}>{garment.name}, {price.lines.map((l) => l.color).join(', ')} · {price.qty} шт · {price.total.toLocaleString('ru-RU')} ₽</p>
             <input className={s.input} required maxLength={100} autoComplete="name" placeholder="Имя"
               value={c.name} onChange={field('name')} />
             <input className={s.input} required type="tel" maxLength={30} autoComplete="tel" placeholder="Телефон"

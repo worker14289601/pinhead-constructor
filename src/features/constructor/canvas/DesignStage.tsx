@@ -2,6 +2,7 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import { Group, Image as KImage, Layer, Line, Path, Rect, Stage, Transformer } from 'react-konva';
 import type Konva from 'konva';
+import { appearNode } from './appear';
 import { FRAME, SHAPES } from '../config/garment-shapes';
 import { MAX_USER_ZOOM } from './zoom';
 import { printAreaFor } from '../config/print-areas';
@@ -81,6 +82,13 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom }: {
   const [turn, setTurn] = useState<{ id: number; snap: HTMLCanvasElement; from: Side; to: Side } | null>(null);
   const turnRef = useRef<HTMLDivElement>(null);
   const turnEnabled = useRef(true);
+  // Кроссфейд при смене изделия и цвета: снимок прежнего кадра растворяется поверх нового.
+  const [fade, setFade] = useState<{ id: number; snap: HTMLCanvasElement; base: unknown } | null>(null);
+  const fadeRef = useRef<HTMLDivElement>(null);
+  // Появление новых слоёв: id, которые уже встречались (отмена/повтор/черновик не в счёт), ожидающие и идущие.
+  const seenIds = useRef(new Set<string>());
+  const pendingNew = useRef(new Set<string>());
+  const appearing = useRef(new Map<string, { finish: () => void }>());
   // Сдвиг вида пользователем (px экрана) относительно центрирования на зоне; сбрасывается при смене стороны, модели и масштаба.
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const panRef = useRef(pan);
@@ -105,6 +113,7 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom }: {
     if (st.side === prev.side || st.garmentId !== prev.garmentId || !turnEnabled.current || prefersReducedMotion()) return;
     const stage = stageRef.current;
     if (!stage || !stage.width()) return;
+    settleAppear();
     const hidden = ([guideRef.current, trRef.current] as Array<Konva.Node | null>).filter((n): n is Konva.Node => !!n && n.visible());
     hidden.forEach((n) => n.visible(false));
     let snap: HTMLCanvasElement;
@@ -119,11 +128,93 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom }: {
     turn.snap.style.width = '100%';
     turn.snap.style.height = '100%';
     holder.replaceChildren(turn.snap);
-    const anim = playTurn(holder, content, turnSign(turn.from, turn.to), isHalfTurn(turn.from, turn.to));
+    const anim = playTurn(holder, content, turnSign(turn.from, turn.to), isHalfTurn(turn.from, turn.to), {
+      ready: () => isReady.current(),
+      draw: () => stageRef.current?.draw(),
+    });
     let alive = true;
     anim.finished.then(() => alive && setTurn((t) => (t?.id === turn.id ? null : t))).catch(() => {});
     return () => { alive = false; anim.cancel(); };
   }, [turn]);
+
+  /** Доводит идущие появления слоёв до конца: снимки и экспорт не должны застать полупрозрачный слой. */
+  const settleAppear = () => { [...appearing.current.values()].forEach((a) => a.finish()); };
+
+  // Новый слой (добавлен, а не восстановлен отменой/повтором или черновиком) появляется плавно.
+  useEffect(() => {
+    useConstructor.getState().layers.forEach((l) => seenIds.current.add(l.id));
+    return useConstructor.subscribe((st, prev) => {
+      const added = st.layers.length === prev.layers.length + 1 && st.past.length === prev.past.length + 1
+        ? st.layers.find((l) => !seenIds.current.has(l.id))
+        : undefined;
+      st.layers.forEach((l) => seenIds.current.add(l.id));
+      if (added && added.side === st.side && !prefersReducedMotion()) pendingNew.current.add(added.id);
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    const g = printRef.current;
+    if (!g || !pendingNew.current.size) return;
+    for (const id of [...pendingNew.current]) {
+      const node = g.findOne(`#${id}`);
+      if (!node) continue;
+      pendingNew.current.delete(id);
+      const layer = useConstructor.getState().layers.find((l) => l.id === id);
+      const ready = () => {
+        if (!layer) return true;
+        if (layer.kind === 'text') return fontReady(layer.fontFamily, layer.bold, layer.italic, layer.text);
+        return !!(node as Konva.Image).image();
+      };
+      appearing.current.set(id, appearNode(node, ready, () => appearing.current.delete(id)));
+    }
+  });
+
+  // Смена изделия или цвета: снимок прежнего кадра, как только стор поменялся (холст ещё старый).
+  const mockupRef = useRef<unknown>(null);
+  useEffect(() => useConstructor.subscribe((st, prev) => {
+    if ((st.garmentId === prev.garmentId && st.variantId === prev.variantId) || !turnEnabled.current || prefersReducedMotion()) return;
+    const stage = stageRef.current;
+    if (!stage || !stage.width() || !prev.garmentId) return;
+    settleAppear();
+    const hidden = ([guideRef.current, trRef.current] as Array<Konva.Node | null>).filter((n): n is Konva.Node => !!n && n.visible());
+    hidden.forEach((n) => n.visible(false));
+    let snap: HTMLCanvasElement;
+    try { snap = stage.toCanvas({ pixelRatio: Math.min(2, window.devicePixelRatio || 1) }); } finally { hidden.forEach((n) => n.visible(true)); }
+    setFade({ id: Date.now(), snap, base: mockupRef.current });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), []);
+
+  const fadeReady = useRef<(base: unknown) => boolean>(() => true);
+  useLayoutEffect(() => {
+    const holder = fadeRef.current;
+    if (!fade || !holder) return;
+    fade.snap.style.width = '100%';
+    fade.snap.style.height = '100%';
+    holder.replaceChildren(fade.snap);
+    let alive = true;
+    let anim: Animation | null = null;
+    let timer = 0;
+    const started = Date.now();
+    const go = () => {
+      if (!alive) return;
+      stageRef.current?.draw();
+      // Дать браузеру показать новый кадр под снимком, затем растворить снимок.
+      timer = window.setTimeout(() => {
+        if (!alive) return;
+        anim = holder.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 400, easing: 'cubic-bezier(.3,.1,.3,1)', fill: 'forwards' });
+        anim.finished.then(() => alive && setFade((f) => (f?.id === fade.id ? null : f)), () => {});
+      }, 50);
+    };
+    const wait = () => {
+      if (!alive) return;
+      if (fadeReady.current(fade.base) || Date.now() - started > 800) go();
+      else timer = window.setTimeout(wait, 30);
+    };
+    wait();
+    // Страховка: фоновая вкладка не гонит анимации — снимок не должен зависнуть.
+    const guard = window.setTimeout(() => alive && setFade((f) => (f?.id === fade.id ? null : f)), 2500);
+    return () => { alive = false; clearTimeout(timer); clearTimeout(guard); anim?.cancel(); };
+  }, [fade]);
 
   // Холст тянется по контейнеру с пропорциями кадра 400×460.
   useEffect(() => {
@@ -288,6 +379,10 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom }: {
     });
   };
 
+  mockupRef.current = mockup;
+  // Новый кадр готов: мокап другой, чем при снимке, и это мокап текущей стороны (у силуэта без мокапа — сразу).
+  fadeReady.current = (base) => !shape || (!!mockup && mockup !== base && mockup.url === shape.images[side]);
+
   /** Временно прячет служебные узлы на время снимка. */
   const withHidden = <T,>(nodes: Array<Konva.Node | null>, fn: () => T): T => {
     const shown = nodes.filter((n): n is Konva.Node => !!n && n.visible());
@@ -305,11 +400,14 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom }: {
   };
 
   useImperativeHandle(apiRef, () => ({
-    exportPreview: () =>
-      stageRef.current
+    exportPreview: () => {
+      settleAppear();
+      return stageRef.current
         ? withHidden([guideRef.current, trRef.current], () => unpanned(() => stageRef.current!.toDataURL({ pixelRatio: 2 })))
-        : null,
+        : null;
+    },
     exportPrint: () => {
+      settleAppear();
       const g = printRef.current;
       if (!g || !pa || !area) return null;
       const targetPx = (pa.widthCm / 2.54) * DPI;
@@ -349,7 +447,7 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom }: {
         };
         setTimeout(check, 0);
       }),
-    setTurnEnabled: (on) => { turnEnabled.current = on; if (!on) setTurn(null); },
+    setTurnEnabled: (on) => { turnEnabled.current = on; if (!on) { setTurn(null); setFade(null); settleAppear(); } },
     align: (id, mode) => {
       const g = printRef.current;
       const node = g?.findOne(`#${id}`);
@@ -467,6 +565,7 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom }: {
         </Layer>
       </Stage>
       {turn && <div ref={turnRef} className={c.turn} aria-hidden />}
+      {fade && <div ref={fadeRef} className={c.turn} aria-hidden />}
       {area && !turn && empty && sideLayers.length === 0 && (
         <EmptyZone
           rect={{ left: area.x * view.k + view.x, top: area.y * view.k + view.y, width: area.w * view.k, height: area.h * view.k }}

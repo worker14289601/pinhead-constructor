@@ -1,9 +1,10 @@
 'use client';
+import { useEffect, useRef, useState } from 'react';
 import { track } from '../analytics/events';
 import { METHOD_INFO } from '../config/pricing';
 import { SIZE_CHART } from '../config/size-chart';
 import type { calcPrice } from '../model/pricing';
-import { useConstructor } from '../model/store';
+import { selectGarment, selectSizes, useConstructor, variantQty } from '../model/store';
 import { SIDE_LABEL, type GarmentVariant, type PrintMethod } from '../model/types';
 import { Icon } from './icons';
 import s from './constructor.module.css';
@@ -11,6 +12,12 @@ import o from './order.module.css';
 
 type Price = ReturnType<typeof calcPrice>;
 const rub = (n: number) => `${n.toLocaleString('ru-RU')} ₽`;
+const sizeList = (sizes: Array<[string, number]>) => sizes.map(([k, n]) => `${k}×${n}`).join(', ');
+/** 1 цвет, 2 цвета, 5 цветов. */
+export const colorsWord = (n: number) => {
+  const d = n % 10, h = n % 100;
+  return `${n} ${d === 1 && h !== 11 ? 'цвет' : d >= 2 && d <= 4 && (h < 12 || h > 14) ? 'цвета' : 'цветов'}`;
+};
 
 /** «DTG — прямая печать» → «DTG» и «прямая печать». */
 const splitTitle = (t: string) => {
@@ -30,8 +37,21 @@ export function OrderPanel({ variant, price, onSizeChart }: {
   onSizeChart: () => void;
 }) {
   const method = useConstructor((st) => st.method);
-  const sizes = useConstructor((st) => st.sizes);
-  const { setMethod, incSize, setSizeQty } = useConstructor.getState();
+  const sizes = useConstructor(selectSizes);
+  const quantities = useConstructor((st) => st.quantities);
+  const garments = useConstructor((st) => st.garments);
+  const garment = useConstructor(selectGarment);
+  const { setMethod, incSize, setSizeQty, copySizes, clearSizes, selectVariant, selectGarment: openGarment } = useConstructor.getState();
+
+  const lines = price?.lines ?? [];
+  const curQty = price?.current?.qty ?? 0;
+  // Цвет пока пустой, а другие набраны — предлагаем взять их размеры (только те, что есть у этого цвета).
+  const copyFrom = curQty ? [] : lines.filter((l) => l.productId !== variant?.productId && l.sizes.some(([k]) => variant?.sizes.includes(k)));
+  // Набранное у других моделей в заявку не идёт: в одной заявке одна модель.
+  const elsewhere = garments
+    .filter((g) => g.id !== garment?.id)
+    .map((g) => ({ g, qty: g.variants.reduce((n, v) => n + variantQty(quantities, v), 0) }))
+    .filter((x) => x.qty > 0);
 
   return (
     <>
@@ -60,6 +80,20 @@ export function OrderPanel({ variant, price, onSizeChart }: {
           </button>
         )}
       </div>
+      {variant && garment && garment.variants.length > 1 && (
+        <p className={o.forColor}><i style={{ background: variant.hex }} />Для цвета «{variant.colorName}»</p>
+      )}
+      {copyFrom.length > 0 && (
+        <div className={o.copy}>
+          <span className={o.note}>Те же размеры, что у:</span>
+          {copyFrom.slice(0, 3).map((l) => (
+            <button key={l.productId} type="button" className={o.copyBtn} title={sizeList(l.sizes)}
+              onClick={() => { copySizes(l.productId); track('sizes_copy'); }}>
+              <i style={{ background: l.hex }} />{l.color}<small>{sizeList(l.sizes)}</small>
+            </button>
+          ))}
+        </div>
+      )}
       <div className={o.sizes}>
         {variant?.sizes.map((size) => {
           const q = sizes[size] ?? 0;
@@ -79,12 +113,38 @@ export function OrderPanel({ variant, price, onSizeChart }: {
           );
         })}
       </div>
-      {!!price?.qty && <p className={o.total}>Итого: <b>{price.qty} шт</b></p>}
+      {lines.length > 0 && (
+        <div className={o.cart}>
+          <p className={o.cartHead}>В заявке{lines.length > 1 && ` · ${colorsWord(lines.length)}`}</p>
+          {lines.map((l) => (
+            <div key={l.productId} className={l.productId === variant?.productId ? o.lineActive : o.line}>
+              <button type="button" className={o.lineMain} onClick={() => selectVariant(l.productId)}
+                aria-label={`${l.color}: ${sizeList(l.sizes)}`}>
+                <i style={{ background: l.hex }} />
+                <span className={o.lineName}>{l.color}<small>{sizeList(l.sizes)}</small></span>
+                <span className={o.lineSum}>{l.qty} шт<small>{rub(l.total)}</small></span>
+              </button>
+              <button type="button" className={o.lineDel} aria-label={`Убрать ${l.color} из заявки`} title="Убрать из заявки"
+                onClick={() => { clearSizes(l.productId); track('color_remove'); }}>
+                <Icon name="close" size={14} />
+              </button>
+            </div>
+          ))}
+          {lines.length > 1 && <p className={o.total}>Итого: <b>{price!.qty} шт</b></p>}
+        </div>
+      )}
+      {elsewhere.map(({ g, qty }) => (
+        <p key={g.id} className={o.elsewhere}>
+          У модели «{g.name}» набрано {qty} шт — они не в этой заявке: в одной заявке одна модель.{' '}
+          <button type="button" className={o.inlineLink} onClick={() => openGarment(g.id)}>Открыть</button>
+        </p>
+      ))}
 
-      {price && price.sides.length > 0 && (
+      {price?.current && price.current.sides.length > 0 && (
         <div className={o.card}>
-          <div className={o.row}><span>Изделие</span><span>{rub(price.garment)}</span></div>
-          {price.sides.map((x) => (
+          {lines.length > 1 && <div className={`${o.row} ${o.plain}`}><span className={o.note}>Цена за шт · {price.current.color}</span></div>}
+          <div className={o.row}><span>Изделие</span><span>{rub(price.current.garment)}</span></div>
+          {price.current.sides.map((x) => (
             <div key={x.side} className={o.row}>
               <span>
                 Печать: {SIDE_LABEL[x.side].toLowerCase()} · {x.format}
@@ -106,13 +166,43 @@ export function OrderPanel({ variant, price, onSizeChart }: {
 }
 
 /** Закреплённый итог: сумма и кнопка заявки (дизайн → размеры → заявка). */
+/** Плавный пересчёт числа (~0,4 с, ease-out); при reduced-motion — сразу. */
+function CountUp({ value }: { value: number }) {
+  const [shown, setShown] = useState(value);
+  const cur = useRef(value);
+  useEffect(() => {
+    const from = cur.current;
+    if (from === value) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      cur.current = value;
+      setShown(value);
+      return;
+    }
+    const t0 = performance.now();
+    let raf = 0;
+    const step = (now: number) => {
+      const k = Math.min(1, (now - t0) / 400);
+      const v = Math.round(from + (value - from) * (1 - Math.pow(1 - k, 3)));
+      cur.current = v;
+      setShown(v);
+      if (k < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [value]);
+  return <>{rub(shown)}</>;
+}
+
 export function OrderFooter({ price, hasDesign, onOrder }: { price: Price | null; hasDesign: boolean; onOrder: () => void }) {
   const canOrder = !!price?.qty && hasDesign;
+  const one = price?.lines.length === 1 ? price.lines[0] : null;
   return (
     <footer className={`${s.footer} ${o.footer}`}>
       <div className={o.footerPrice}>
-        <div className={o.sum}>{price ? (price.qty ? rub(price.total) : <>{rub(price.perItem)} <small>/ шт</small></>) : '—'}</div>
-        <p className={o.sub2}>{price?.qty ? `${price.qty} шт · ${rub(price.perItem)} за шт` : 'Цена примерная, уточнит менеджер'}</p>
+        <div className={o.sum}>{price ? <CountUp value={price.qty ? price.total : price.current?.perItem ?? 0} /> : '—'}</div>
+        {price?.qty ? (
+          <p className={o.sub2}>{one ? `${one.qty} шт · ${rub(one.perItem)} за шт` : `${price.qty} шт · ${colorsWord(price.lines.length)}`}</p>
+        ) : null}
       </div>
       <button className={o.button} onClick={onOrder} aria-disabled={!canOrder}>
         {!hasDesign ? 'Добавить дизайн' : !price?.qty ? 'Выбрать размеры' : 'Оформить заявку'}

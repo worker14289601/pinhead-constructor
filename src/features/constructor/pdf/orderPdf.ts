@@ -10,13 +10,12 @@ export interface OrderPdfData {
   number: string;
   createdAt: Date;
   garment: string;
-  color: string;
   method: PrintMethod;
-  sizes: Array<[size: string, qty: number]>;
+  /** Цвета, размеры и цены — по price.lines. */
   price: PriceBreakdown;
   contacts: OrderContacts;
-  /** Превью изделия с принтом по сторонам (PNG dataURL). */
-  previews: Array<{ side: Side; dataUrl: string }>;
+  /** Превью по цветам и сторонам, в порядке price.lines (PNG dataURL). */
+  previews: Array<{ color: string; side: Side; dataUrl: string }>;
   /** Имена файлов, загруженных клиентом. */
   fileNames: string[];
 }
@@ -39,19 +38,19 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 }
 
 /** Пишет текст с переносом по словам; возвращает y следующей строки. */
-function wrap(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxW: number, lineH: number): number {
+function wrap(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxW: number, lineH: number, draw = true): number {
   let line = '';
   for (const word of text.split(/\s+/).filter(Boolean)) {
     const test = line ? `${line} ${word}` : word;
     if (line && ctx.measureText(test).width > maxW) {
-      ctx.fillText(line, x, y);
+      if (draw) ctx.fillText(line, x, y);
       line = word;
       y += lineH;
     } else {
       line = test;
     }
   }
-  if (line) ctx.fillText(line, x, y);
+  if (line && draw) ctx.fillText(line, x, y);
   return y + lineH;
 }
 
@@ -84,66 +83,111 @@ async function renderPage(d: OrderPdfData): Promise<HTMLCanvasElement> {
   ctx.fillStyle = C.accent;
   ctx.fillRect(M, M + 88, W - 2 * M, 6);
 
-  // Превью: одна-две стороны — крупно, три-четыре — в ряд.
+  // Превью: одно-два — крупно, дальше до четырёх в ряд; больше восьми не рисуем.
   const top = M + 130;
   const gap = 24;
-  const n = Math.max(1, d.previews.length);
-  const cols = n <= 2 ? 2 : 4;
-  const pw = Math.floor((W - 2 * M - gap * (cols - 1)) / cols);
-  let ph = 0;
-  for (let i = 0; i < d.previews.length; i++) {
-    const p = d.previews[i];
-    const img = await loadImage(p.dataUrl);
-    ph = Math.round((pw * img.naturalHeight) / img.naturalWidth);
-    const x = M + i * (pw + gap);
-    ctx.fillStyle = C.paper;
-    ctx.fillRect(x, top, pw, ph);
-    ctx.drawImage(img, x, top, pw, ph);
-    ctx.fillStyle = C.muted;
-    ctx.font = font(22);
-    ctx.fillText(SIDE_LABEL[p.side], x, top + ph + 34);
-  }
+  const LABEL_H = 56;
+  const MAX_PREVIEWS = 8;
+  const shown = d.previews.slice(0, MAX_PREVIEWS);
+  const hidden = d.previews.length - shown.length;
+  const images = await Promise.all(shown.map((p) => loadImage(p.dataUrl)));
+  const cols = shown.length <= 2 ? 2 : 4;
+  const baseW = Math.floor((W - 2 * M - gap * (cols - 1)) / cols);
 
-  // Две колонки: детали заказа и контакты.
+  // Детали заказа: список «название — значение»; одинаков для расчёта высоты и для рисования.
   const colGap = 70;
   const cw = (W - 2 * M - colGap) / 2;
-  const y0 = top + ph + 110;
-  const rows = (title: string, x: number, items: Array<[string, string]>) => {
+  const p = d.price;
+  const details: Array<[string, string]> = [
+    ['Изделие', d.garment],
+    ['Нанесение', d.method.toUpperCase()],
+  ];
+  // Формат печати у всех цветов одинаковый (зависит от габарита принта), цена — разная.
+  const printSides = p.lines[0]?.sides ?? [];
+  if (printSides.length) {
+    details.push(['Формат печати', printSides.map((x) =>
+      `${SIDE_LABEL[x.side].toLowerCase()} ${x.format}${x.oversize ? ' (крупнее формата)' : ''} ≈ ${Math.round(x.wCm)} × ${Math.round(x.hCm)} см`,
+    ).join('; ')]);
+  }
+  for (const l of p.lines) {
+    const prints = l.sides.map((x) => `${SIDE_LABEL[x.side].toLowerCase()} ${x.format} ${rub(x.price)}`).join(', ');
+    details.push([`Цвет: ${l.color} — ${l.qty} шт`, l.sizes.map(([s, q]) => `${s} × ${q}`).join(', ')]);
+    details.push(['За шт', `${rub(l.perItem)} (изделие ${rub(l.garment)}${prints ? ` + печать: ${prints}` : ''})`]);
+    details.push(['Сумма по цвету', rub(l.total)]);
+  }
+  details.push(['Количество всего', `${p.qty} шт`]);
+  if (p.tierFrom > 1) details.push(['Цена печати', `действует от ${p.tierFrom} шт`]);
+  if (d.fileNames.length) details.push(['Файлы клиента', d.fileNames.join(', ')]);
+
+  const rows = (title: string, x: number, y0: number, items: Array<[string, string]>, draw = true) => {
     let y = y0;
-    ctx.fillStyle = C.text;
-    ctx.font = font(32, 800);
-    ctx.fillText(title, x, y);
+    if (draw) {
+      ctx.fillStyle = C.text;
+      ctx.font = font(32, 800);
+      ctx.fillText(title, x, y);
+    }
     y += 56;
     for (const [k, v] of items) {
-      ctx.fillStyle = C.muted;
-      ctx.font = font(21);
-      ctx.fillText(k, x, y);
-      ctx.fillStyle = C.text;
+      if (draw) {
+        ctx.fillStyle = C.muted;
+        ctx.font = font(21);
+        ctx.fillText(k, x, y);
+        ctx.fillStyle = C.text;
+      }
       ctx.font = font(25, 600);
-      y = wrap(ctx, v, x, y + 32, cw, 32) + 14;
+      y = wrap(ctx, v, x, y + 32, cw, 32, draw) + 14;
     }
     return y;
   };
 
-  const p = d.price;
-  const details: Array<[string, string]> = [
-    ['Изделие', d.garment],
-    ['Цвет', d.color],
-    ['Нанесение', d.method.toUpperCase()],
-    ['Размеры', d.sizes.map(([s, q]) => `${s} × ${q}`).join(', ')],
-    ['Количество', `${p.qty} шт`],
-    ['Изделие, за шт', rub(p.garment)],
-    ...p.sides.map((x): [string, string] => [
-      `Печать: ${SIDE_LABEL[x.side].toLowerCase()}, за шт`,
-      `${rub(x.price)} · ${x.format}${x.oversize ? ' (крупнее формата)' : ''} · ≈ ${Math.round(x.wCm)} × ${Math.round(x.hCm)} см`,
-    ]),
-    ['Цена за шт', rub(p.perItem)],
-  ];
-  if (d.fileNames.length) details.push(['Файлы клиента', d.fileNames.join(', ')]);
+  // Нижняя граница, до которой могут дойти детали: подвал и запас под него.
+  const bottom = H - M - 20;
+  // Масштаб превью уменьшаем, пока детали не поместятся под ними.
+  let scale = 1;
+  let ph = 0;
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const pw = Math.floor(baseW * scale);
+    const rowsH: number[] = [];
+    images.forEach((img, i) => {
+      const r = Math.floor(i / cols);
+      rowsH[r] = Math.max(rowsH[r] ?? 0, Math.round((pw * img.naturalHeight) / img.naturalWidth));
+    });
+    ph = rowsH.reduce((s, h) => s + h + LABEL_H, 0) + (hidden > 0 ? 40 : 0);
+    const yDry = top + ph + 40 + 30;
+    if (rows('Детали заказа', M, yDry, details, false) <= bottom || scale < 0.4) break;
+    scale *= 0.92;
+  }
 
+  const pw = Math.floor(baseW * scale);
+  let rowY = top;
+  let rowH = 0;
+  ctx.font = font(22);
+  images.forEach((img, i) => {
+    const col = i % cols;
+    if (col === 0 && i > 0) { rowY += rowH + LABEL_H; rowH = 0; }
+    const h = Math.round((pw * img.naturalHeight) / img.naturalWidth);
+    rowH = Math.max(rowH, h);
+    const x = M + col * (pw + gap);
+    ctx.fillStyle = C.paper;
+    ctx.fillRect(x, rowY, pw, h);
+    ctx.drawImage(img, x, rowY, pw, h);
+    ctx.fillStyle = C.muted;
+    ctx.font = font(22);
+    let label = `${shown[i].color} · ${SIDE_LABEL[shown[i].side]}`;
+    while (label.length > 3 && ctx.measureText(label).width > pw) label = `${label.slice(0, -2)}…`;
+    ctx.fillText(label, x, rowY + h + 34);
+  });
+  if (hidden > 0) {
+    ctx.fillStyle = C.muted;
+    ctx.font = font(22);
+    ctx.fillText(`ещё ${hidden} макетов — в заявке`, M, top + ph - 8);
+  }
+
+  // Две колонки: детали заказа и контакты.
+  const y0 = top + ph + 70;
   const c = d.contacts;
-  const yDetails = rows('Детали заказа', M, details);
-  const yContacts = rows('Контакты', M + cw + colGap, [
+  const yDetails = rows('Детали заказа', M, y0, details);
+  const yContacts = rows('Контакты', M + cw + colGap, y0, [
     ['Имя', c.name], ['Телефон', c.phone], ['E-mail', c.email], ['Город', c.city],
     ['Адрес', c.address || '—'], ['Комментарий', c.comment || '—'],
   ]);

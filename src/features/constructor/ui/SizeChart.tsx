@@ -1,12 +1,15 @@
 'use client';
 import { SIZE_CHART } from '../config/size-chart';
 import s from './constructor.module.css';
+import { useDismiss } from './useDismiss';
 
 /** Модалка с таблицей обмеров. Показываем строки только тех размеров, что есть у выбранного цвета. */
 export function SizeChart({ sizes, onClose }: { sizes: string[]; onClose: () => void }) {
+  const { leaving, dismiss } = useDismiss();
+  const close = () => dismiss(onClose);
   const rows = SIZE_CHART.filter((r) => !sizes.length || sizes.includes(r.size));
   return (
-    <div className={s.modalBg} onClick={onClose}>
+    <div className={s.modalBg} data-leaving={leaving || undefined} onClick={close}>
       <div className={s.modal} role="dialog" aria-label="Таблица размеров" onClick={(e) => e.stopPropagation()}>
         <h3>Таблица размеров</h3>
         <table className={s.chart}>
@@ -20,7 +23,7 @@ export function SizeChart({ sizes, onClose }: { sizes: string[]; onClose: () => 
           </tbody>
         </table>
         <p className={s.muted}>Размеры в сантиметрах, замер изделия лёжа. Допуск ±1–2 см; у разных моделей крой отличается.</p>
-        <button className={s.cta} onClick={onClose}>Понятно</button>
+        <button className={s.cta} onClick={close}>Понятно</button>
       </div>
     </div>
   );

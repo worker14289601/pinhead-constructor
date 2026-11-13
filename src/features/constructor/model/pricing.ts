@@ -25,45 +25,87 @@ export function tierIndex(qty: number, tiers: number[]): number {
   return i;
 }
 
-export interface PriceBreakdown {
+/** Печать одной стороны: формат и цена за принт на текущей ступени тиража. */
+export interface SidePrice { side: Side; format: PrintFormat; price: number; oversize: boolean; wCm: number; hCm: number }
+
+/** Один цвет заявки: изделие, количество по размерам и его цена. */
+export interface PriceLine {
+  productId: string;
+  color: string;
+  hex: string;
+  /** Размеры с количеством больше нуля, по шкале. */
+  sizes: Array<[size: string, qty: number]>;
+  qty: number;
+  /** Цена изделия за штуку. */
   garment: number;
-  /** Печать по сторонам; цена — за принт на текущей ступени тиража. */
-  sides: Array<{ side: Side; format: PrintFormat; price: number; oversize: boolean; wCm: number; hCm: number }>;
+  /** Печать по сторонам: у белой ткани она дешевле, поэтому у каждого цвета своя. */
+  sides: SidePrice[];
   perItem: number;
+  total: number;
+}
+
+export interface PriceBreakdown {
+  /** Цвета, по которым есть количество, — в порядке каталога. */
+  lines: PriceLine[];
+  /** Выбранный цвет — даже если по нему пока 0 шт: панель показывает его разбивку. */
+  current: PriceLine | null;
+  /** Всего штук по всем цветам. */
   qty: number;
   total: number;
   /** От скольких штук действует текущая ступень цены (1 — базовая). */
   tierFrom: number;
-  /** Следующая ступень: от скольких штук и какой станет цена за штуку. null — дешевле уже не будет. */
+  /** Следующая ступень: от скольких штук и сколько тогда будет стоить штука выбранного цвета. null — дешевле уже не будет. */
   next: { qty: number; perItem: number } | null;
 }
 
-export function calcPrice(args: {
+/** Цвет модели, как его видит расчёт. */
+export interface PriceVariant {
+  productId: string;
+  color: string;
+  hex: string;
   garmentPrice: number;
   isWhite: boolean;
+  /** Все размеры цвета по шкале — порядок строк размеров в заявке. */
+  sizeNames: string[];
+  sizes: SizeQuantities;
+}
+
+export function calcPrice(args: {
   method: PrintMethod;
   bounds: SideBounds;
-  sizes: SizeQuantities;
+  /** Все цвета модели в порядке каталога (с количеством и без). */
+  variants: PriceVariant[];
+  currentId: string | null;
 }): PriceBreakdown {
   const list = priceListFor(args.method);
-  // Ступень — по общему количеству заявки, а не по каждому размеру.
-  const qty = Object.values(args.sizes).reduce((s, n) => s + n, 0);
+  const count = (v: PriceVariant) => v.sizeNames.reduce((s, k) => s + (v.sizes[k] ?? 0), 0);
+  // Ступень — по общему количеству заявки: принт один, тираж общий для всех цветов и размеров.
+  const qty = args.variants.reduce((s, v) => s + count(v), 0);
   const tier = tierIndex(qty, list.tiers);
-  const priceAt = (f: FormatPrice, t: number) => (args.isWhite ? f.white : f.colored)[t];
 
   const printed = (Object.entries(args.bounds) as Array<[Side, { wCm: number; hCm: number } | null]>)
     .filter((e): e is [Side, { wCm: number; hCm: number }] => !!e[1] && e[1].wCm > 0)
     .map(([side, b]) => ({ side, b, ...formatFor(b.wCm, b.hCm, list) }));
+  const priceAt = (f: FormatPrice, white: boolean, t: number) => (white ? f.white : f.colored)[t];
 
-  const sides = printed.map(({ side, b, format, oversize }) => ({
-    side, format: format.name, price: priceAt(format, tier), oversize, wCm: b.wCm, hCm: b.hCm,
-  }));
-  const perItem = args.garmentPrice + sides.reduce((s, x) => s + x.price, 0);
+  const lineFor = (v: PriceVariant): PriceLine => {
+    const sides = printed.map(({ side, b, format, oversize }) => ({
+      side, format: format.name, price: priceAt(format, v.isWhite, tier), oversize, wCm: b.wCm, hCm: b.hCm,
+    }));
+    const perItem = v.garmentPrice + sides.reduce((s, x) => s + x.price, 0);
+    const sizes = v.sizeNames.map((k): [string, number] => [k, v.sizes[k] ?? 0]).filter(([, n]) => n > 0);
+    const n = count(v);
+    return { productId: v.productId, color: v.color, hex: v.hex, sizes, qty: n, garment: v.garmentPrice, sides, perItem, total: perItem * n };
+  };
+
+  const lines = args.variants.filter((v) => count(v) > 0).map(lineFor);
+  const cur = args.variants.find((v) => v.productId === args.currentId);
+  const current = cur ? lineFor(cur) : null;
 
   const nextQty = list.tiers[tier + 1];
-  const next = printed.length && nextQty
-    ? { qty: nextQty, perItem: args.garmentPrice + printed.reduce((s, x) => s + priceAt(x.format, tier + 1), 0) }
+  const next = printed.length && nextQty && cur
+    ? { qty: nextQty, perItem: cur.garmentPrice + printed.reduce((s, x) => s + priceAt(x.format, cur.isWhite, tier + 1), 0) }
     : null;
 
-  return { garment: args.garmentPrice, sides, perItem, qty, total: perItem * qty, tierFrom: list.tiers[tier], next };
+  return { lines, current, qty, total: lines.reduce((s, l) => s + l.total, 0), tierFrom: list.tiers[tier], next };
 }

@@ -5,7 +5,7 @@
 .card, .cardPrimary {
   display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0; min-height: 112px;
   padding: 14px 12px; border: 1px solid var(--ink); border-radius: 12px; background: #fff;
-  text-align: left; cursor: pointer; transition: background-color .15s;
+  text-align: left; cursor: pointer; transition: background-color var(--t-fast, .32s);
 }
 .cardPrimary { background: var(--lime); }
 .card:hover { background: var(--lime-soft); }
@@ -18,7 +18,7 @@
 .addBtn {
   display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 6px 8px;
   border: 1px solid var(--ink); border-radius: var(--r-ctl); background: #fff; cursor: pointer;
-  font-size: 12px; font-weight: 800; text-transform: uppercase; transition: background-color .15s;
+  font-size: 12px; font-weight: 800; text-transform: uppercase; transition: background-color var(--t-fast, .32s);
 }
 .addBtn:hover { background: var(--lime); }
 
@@ -31,7 +31,7 @@
 .chipIcon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; background: var(--lime); }
 .closeBtn {
   width: 36px; height: 36px; display: grid; place-items: center; padding: 0; flex: none; cursor: pointer;
-  border: 1px solid var(--line); border-radius: var(--r-ctl); background: #fff; transition: border-color .15s, background-color .15s;
+  border: 1px solid var(--line); border-radius: var(--r-ctl); background: #fff; transition: border-color var(--t-fast, .32s), background-color var(--t-fast, .32s);
 }
 .closeBtn:hover { border-color: var(--ink); background: var(--paper); }
 
@@ -47,7 +47,7 @@
 .seg { display: flex; border: 1px solid var(--ink); border-radius: var(--r-ctl); overflow: hidden; background: #fff; }
 .segBtn {
   flex: 1 1 0; min-width: 0; height: 40px; display: grid; place-items: center; padding: 0; border: 0;
-  background: #fff; cursor: pointer; transition: background-color .15s;
+  background: #fff; cursor: pointer; transition: background-color var(--t-fast, .32s);
 }
 .segBtn + .segBtn { border-left: 1px solid var(--ink); }
 .segBtn:hover:not(:disabled) { background: var(--lime-soft); }
@@ -71,11 +71,11 @@
 .fontSel {
   display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 6px 12px;
   border: 1px solid var(--ink); border-radius: 10px; background: #fff; cursor: pointer; text-align: left;
-  transition: background-color .15s;
+  transition: background-color var(--t-fast, .32s);
 }
 .fontSel:hover, .fontSelOpen { background: var(--lime-soft); }
 .fontSelOpen svg:last-child { transform: rotate(180deg); }
-.fontSel svg { flex: none; transition: transform .15s; }
+.fontSel svg { flex: none; transition: transform var(--t-fast, .32s); }
 .fontPreview { flex: 1; min-width: 0; font-size: 20px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fontName { flex: none; max-width: 40%; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -88,7 +88,7 @@
 .fontOpt, .fontOptActive {
   display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 4px 12px; flex: none;
   border: 1px solid var(--line); border-radius: 10px; background: #fff; cursor: pointer; text-align: left;
-  transition: border-color .15s, background-color .15s;
+  transition: border-color var(--t-fast, .32s), background-color var(--t-fast, .32s);
 }
 .fontOpt:hover { border-color: var(--ink); }
 .fontOptActive { border-color: var(--ink); background: var(--lime-soft); }
@@ -98,13 +98,13 @@
 .palette { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .dot, .dotActive {
   width: 28px; height: 28px; padding: 0; border-radius: 50%; border: 1px solid var(--ink); cursor: pointer;
-  transition: box-shadow .15s;
+  transition: box-shadow var(--t-fast, .32s);
 }
 .dotActive { box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--ink); }
 .customColor {
   position: relative; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 10px 0 4px;
   border: 1px solid var(--ink); border-radius: var(--r-ctl); background: #fff; cursor: pointer;
-  font-size: 12px; font-weight: 800; text-transform: uppercase; transition: background-color .15s;
+  font-size: 12px; font-weight: 800; text-transform: uppercase; transition: background-color var(--t-fast, .32s);
 }
 .customColor:hover { background: var(--lime-soft); }
 .colorInput { width: 28px; height: 28px; padding: 0; border: 1px solid var(--ink); border-radius: 50%; background: none; cursor: pointer; }
@@ -122,11 +122,11 @@
 .switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .track {
   position: relative; flex: none; width: 40px; height: 22px; border-radius: 11px; border: 1px solid var(--ink);
-  background: #fff; transition: background-color .15s;
+  background: #fff; transition: background-color var(--t-fast, .32s);
 }
 .track::after {
   content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
-  background: var(--ink); transition: transform .15s;
+  background: var(--ink); transition: transform var(--t-fast, .32s);
 }
 .switch input:checked + .track { background: var(--lime); }
 .switch input:checked + .track::after { transform: translateX(18px); }
@@ -143,3 +143,24 @@
   .fontOpt, .fontOptActive { min-height: 44px; }
   .fontList { max-height: 320px; }
 }
+
+/* ─── Движение (токены — в constructor.module.css) ─── */
+@keyframes rise { from { opacity: 0; translate: 0 6px; } }
+@keyframes drop { from { opacity: 0; translate: 0 -6px; } }
+@keyframes fade { from { opacity: 0; } }
+
+.actions, .addRow { animation: rise var(--t-base, .53s) var(--ease-out, ease-out) backwards; }
+/* Настройки слоя собираются лесенкой сверху вниз */
+.body > * { animation: rise .6s var(--ease-out, ease-out) backwards; }
+.body > :nth-child(2) { animation-delay: .06s; }
+.body > :nth-child(3) { animation-delay: .12s; }
+.body > :nth-child(n+4) { animation-delay: .18s; }
+.badge, .note { animation: fade .6s var(--ease-out, ease-out) backwards; }
+.strokeRow { animation: rise var(--t-base, .53s) var(--ease-out, ease-out) backwards; }
+.fontList { animation: drop .47s var(--ease-out, ease-out) backwards; }
+.fontSel svg { transition: transform var(--t-base, .53s) var(--ease-out, ease-out); }
+.card, .cardPrimary { --press: .98; }
+.fontSel, .fontOpt, .fontOptActive { --press: .985; }
+.track, .track::after { transition-duration: .44s; transition-timing-function: var(--ease-out, ease-out); }
+.switch:active .track::after { scale: 1.12 .9; }
+.track::after { transition-property: transform, scale; }

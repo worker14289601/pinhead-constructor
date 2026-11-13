@@ -14,6 +14,11 @@
   --danger: #d32f2f;
   --r-card: 20px;
   --r-ctl: 5px;
+  /* Движение: быстрый старт и мягкая посадка; уход — короче и с разгоном */
+  --ease-out: cubic-bezier(.4, 0, .2, 1);
+  --ease-in: cubic-bezier(.4, 0, .6, 1);
+  --t-fast: .32s;
+  --t-base: .52s;
   --font-body: Neue_machina, var(--pnhd-font-body-fallback, Arial), Helvetica, sans-serif;
   --font-head: DrukTextWideCyr-Medium, var(--pnhd-font-head-fallback, 'Arial Black'), sans-serif;
 
@@ -88,9 +93,16 @@
   flex: none; width: 24px; height: 24px; border-radius: 50%; padding: 0; cursor: pointer;
   /* тонкий внутренний контур — чтобы белый и светлые цвета не терялись на белом фоне */
   border: 0; box-shadow: inset 0 0 0 1px rgba(0,0,0,.18);
-  transition: transform .15s ease, box-shadow .15s ease;
+  transition: transform var(--t-fast, .32s) ease, box-shadow var(--t-fast, .32s) ease;
 }
 .swatch:hover { transform: scale(1.1); }
+/* сколько штук этого цвета в заявке */
+.swatch, .swatchActive { position: relative; }
+.swatchCount {
+  position: absolute; top: -6px; right: -7px; min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box;
+  border-radius: 8px; background: var(--lime); color: var(--ink); box-shadow: 0 0 0 1px var(--ink);
+  font-size: 9px; font-weight: 800; line-height: 15px; text-align: center; pointer-events: none;
+}
 /* выбранный: кольцо цвета текста через белый зазор */
 .swatchActive { box-shadow: inset 0 0 0 1px rgba(0,0,0,.18), 0 0 0 2px #fff, 0 0 0 3.5px var(--ink); }
 .sides { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
@@ -236,10 +248,10 @@
 .type, .typeActive {
   display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 12px;
   padding: 6px 12px 6px 6px; border: 0; background: #fff; text-align: left; cursor: pointer;
-  font-size: 14px; font-weight: 700; transition: background-color .15s;
+  font-size: 14px; font-weight: 700; transition: background-color var(--t-fast, .32s);
 }
 .type + .type, .type + .typeActive, .typeActive + .type { border-top: 1px solid var(--line); }
-.typeIcon { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 8px; background: var(--paper); transition: background-color .15s; }
+.typeIcon { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 8px; background: var(--paper); transition: background-color var(--t-fast, .32s); }
 .typeText { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .typeName, .modelName { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .type small, .typeActive small { font-size: 12px; font-weight: 400; color: var(--muted); white-space: nowrap; }
@@ -253,7 +265,7 @@
 .model, .modelActive {
   display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px;
   padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #fff;
-  text-align: left; cursor: pointer; font-size: 14px; font-weight: 700; transition: border-color .15s, background-color .15s;
+  text-align: left; cursor: pointer; font-size: 14px; font-weight: 700; transition: border-color var(--t-fast, .32s), background-color var(--t-fast, .32s);
 }
 .model::before, .modelActive::before {
   content: ''; width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; border: 1px solid var(--ink); background: #fff;
@@ -298,4 +310,81 @@
 .notice {
   position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); z-index: 9; max-width: calc(100% - 32px);
   padding: 10px 14px; border-radius: var(--r-ctl); background: var(--ink); color: #fff; font-size: 13px; text-align: center;
+}
+
+/* ─── Движение ───
+ * Только opacity и отдельные свойства translate/scale: они не спорят с transform,
+ * которым позиционированы кнопки на холсте и подсказки, и не трогают раскладку.
+ */
+@keyframes rise { from { opacity: 0; translate: 0 6px; } }
+@keyframes fade { from { opacity: 0; } }
+@keyframes pop { from { opacity: 0; scale: .92; } }
+@keyframes dotIn { from { scale: 0; } }
+@keyframes modalIn { from { opacity: 0; translate: 0 14px; scale: .97; } }
+@keyframes modalOut { to { opacity: 0; translate: 0 8px; scale: .98; } }
+@keyframes fadeOut { to { opacity: 0; } }
+@keyframes toastIn { from { opacity: 0; translate: 0 12px; scale: .96; } }
+@keyframes stamp { from { opacity: 0; scale: .85; } }
+
+/* Отдача кнопок: плавная смена цвета и лёгкое нажатие. Широким кнопкам — меньше (--press). */
+.app button {
+  transition-property: background-color, border-color, color, box-shadow, opacity, transform, scale;
+  transition-duration: var(--t-fast);
+  transition-timing-function: var(--ease-out);
+}
+.app button:not(:disabled):not([data-still]):active { scale: var(--press, .975); transition-duration: .22s; }
+.app :is(input, textarea, select) { transition: box-shadow var(--t-fast) var(--ease-out), border-color var(--t-fast) var(--ease-out), background-color var(--t-fast) var(--ease-out); }
+.type, .typeActive, .model, .modelActive, .cta, .btn, .linkBtn, .tabbarBtn, .tabbarActive { --press: .985; }
+
+/* Появление колонок при загрузке — лёгкой волной слева направо */
+.left, .center, .right { animation: rise .5s cubic-bezier(.22, .61, .36, 1) backwards; }
+.center { animation-delay: .05s; }
+.right { animation-delay: .1s; }
+
+/* Холст: рамка перетаскивания файла «въезжает» внутрь */
+.stage { outline: 2px dashed transparent; outline-offset: 0; }
+.stage, .stageDrop { transition: outline-color var(--t-base) var(--ease-out), outline-offset var(--t-base) var(--ease-out), background-color var(--t-base) var(--ease-out); }
+.dropHint { animation: toastIn var(--t-base) var(--ease-out) backwards; }
+.dot { animation: dotIn .6s var(--ease-out) backwards; }
+
+/* Каталог */
+.typeIcon { transition-timing-function: var(--ease-out); }
+.model, .modelActive { animation: rise .45s cubic-bezier(.22, .61, .36, 1) backwards; }
+.model:nth-child(2), .modelActive:nth-child(2) { animation-delay: .04s; }
+.model:nth-child(3), .modelActive:nth-child(3) { animation-delay: .08s; }
+.model:nth-child(4), .modelActive:nth-child(4) { animation-delay: .12s; }
+.model:nth-child(n+5), .modelActive:nth-child(n+5) { animation-delay: .16s; }
+.model::before, .modelActive::before { transition: border-width var(--t-base) var(--ease-out); }
+.about { animation: rise .5s cubic-bezier(.22, .61, .36, 1) .06s backwards; }
+.layers:not([hidden]) { animation: rise var(--t-base) var(--ease-out) backwards; }
+
+/* Сообщения */
+.err, .warn { animation: rise var(--t-base) var(--ease-out) backwards; }
+.notice { animation: toastIn .6s var(--ease-out) backwards; }
+
+/* Окна: фон проявляется с лёгким размытием, карточка поднимается; закрытие — короче (ui/useDismiss.ts) */
+.modalBg { backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); animation: fade .44s var(--ease-out) backwards; }
+.modal { animation: modalIn .6s var(--ease-out) backwards; }
+.modalBg[data-leaving] { pointer-events: none; animation: fadeOut .34s var(--ease-in) forwards; }
+.modalBg[data-leaving] .modal { animation: modalOut .34s var(--ease-in) forwards; }
+.reveal { animation: rise .6s var(--ease-out) backwards; }
+.orderNumber { animation: stamp 1s var(--ease-out) .16s backwards; }
+
+/* Телефон: при смене вкладки панель появляется заново (display: none → block перезапускает анимацию) */
+@media (max-width: 900px) {
+  .left, .section { animation: rise .4s cubic-bezier(.22, .61, .36, 1) backwards; }
+  .right { animation: none; }
+  .modal { animation-name: modalIn; }
+}
+
+/* Полосы прокрутки не показываем: прокрутка и свайп работают как обычно, без всплывающего ползунка */
+:global(html):has(.app), :global(html):has(.app) :global(body), .app, .app * { scrollbar-width: none; -ms-overflow-style: none; }
+:global(html):has(.app)::-webkit-scrollbar, :global(html):has(.app) :global(body)::-webkit-scrollbar,
+.app::-webkit-scrollbar, .app *::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .app *, .app *::before, .app *::after {
+    animation-duration: 1ms !important; animation-delay: 0s !important; animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
 }

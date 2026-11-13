@@ -10,6 +10,8 @@ export type FunnelEvent =
   | 'text_add'
   | 'side_switch'
   | 'size_set'
+  | 'sizes_copy'
+  | 'color_remove'
   | 'order_form_open'
   | 'order_send'
   | 'order_success'
@@ -49,7 +51,9 @@ export function track(event: FunnelEvent, params?: Record<string, unknown>) {
 
 /** Электронная коммерция Метрики: покупка в dataLayer (работает, если в счётчике включён ecommerce). */
 export function trackPurchase(order: {
-  number: string; total: number; perItem: number; qty: number; productId: string; name: string; color: string;
+  number: string; total: number; name: string;
+  /** Цвета заявки: у каждого своя цена за штуку. */
+  items: Array<{ productId: string; color: string; perItem: number; qty: number }>;
 }) {
   if (typeof window === 'undefined') return;
   window.dataLayer = window.dataLayer ?? [];
@@ -58,7 +62,7 @@ export function trackPurchase(order: {
       currencyCode: 'RUB',
       purchase: {
         actionField: { id: order.number, revenue: order.total },
-        products: [{ id: order.productId, name: order.name, variant: order.color, price: order.perItem, quantity: order.qty }],
+        products: order.items.map((x) => ({ id: x.productId, name: order.name, variant: x.color, price: x.perItem, quantity: x.qty })),
       },
     },
   });

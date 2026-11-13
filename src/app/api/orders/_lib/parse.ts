@@ -3,11 +3,13 @@ import { newOrderNumber, ORDER_NUMBER } from './number';
 /** Проверенная заявка: всё, что пришло от клиента, обрезано и приведено к типам. */
 export interface Order {
   number: string;
-  garment: { name: string; color: string };
+  garment: { name: string };
   method: string;
-  sizes: Array<[size: string, qty: number]>;
+  /** Цвета заявки: у каждого свои размеры и цена за штуку. */
+  lines: OrderLine[];
+  /** Всего штук по всем цветам. */
   qty: number;
-  perItem: number;
+  /** Сумма строк, посчитанная здесь: perItem × qty по каждому цвету. */
   total: number;
   /** Печать по сторонам — готовые строки для сообщения. */
   sides: string[];
@@ -15,6 +17,14 @@ export interface Order {
   utm: Record<string, string>;
   page: string;
   files: OrderFile[];
+}
+
+export interface OrderLine {
+  color: string;
+  sizes: Array<[size: string, qty: number]>;
+  qty: number;
+  perItem: number;
+  total: number;
 }
 
 export interface OrderFile {
@@ -34,20 +44,27 @@ export class BadOrder extends Error {
 const SIDE_NAME: Record<string, string> = {
   front: 'перед', back: 'спина', sleeve_left: 'левый рукав', sleeve_right: 'правый рукав',
 };
+/** Превью по цветам: индекс — номер строки заявки. Подпись берётся из цвета строки в parseOrder. */
+const PREVIEW_KEY = /^preview_(\d|1\d)_(front|back|sleeve_left|sleeve_right)$/;
 const METHODS = ['dtf', 'dtg'];
 const UTM_KEYS = ['source', 'medium', 'campaign', 'content', 'term'];
 const MB = 1024 * 1024;
+/** Не больше цветов в заявке: по ним же нумеруются превью. */
+const MAX_LINES = 20;
+/** Общий предел размера всех файлов заявки. */
+const TOTAL_MAX_MB = 300;
 const PNG = ['image/png'];
 const IMAGES = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'];
 
 /** Какие поля с файлами принимаем: шаблон имени поля, типы, предел размера, подпись. */
 const FILE_RULES: Array<{ key: RegExp; types: string[]; maxMb: number; title: (m: RegExpMatchArray) => string }> = [
-  { key: /^preview_(front|back|sleeve_left|sleeve_right)$/, types: PNG, maxMb: 20, title: (m) => `Макет на изделии: ${SIDE_NAME[m[1]]}` },
+  { key: PREVIEW_KEY, types: PNG, maxMb: 20, title: (m) => `Макет на изделии: ${SIDE_NAME[m[2]]}` },
   { key: /^print_(front|back|sleeve_left|sleeve_right)$/, types: PNG, maxMb: 40, title: (m) => `Файл печати: ${SIDE_NAME[m[1]]}` },
   { key: /^original_(\d|1\d)$/, types: IMAGES, maxMb: 15, title: () => 'Файл клиента' },
   { key: /^order_pdf$/, types: ['application/pdf'], maxMb: 20, title: () => 'PDF заказа' },
 ];
 
+const rub = (n: number) => `${n.toLocaleString('ru-RU')} ₽`;
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 const obj = (v: unknown): Record<string, unknown> =>
   v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
@@ -71,8 +88,10 @@ export async function parseOrder(req: Request): Promise<Order> {
   const number = ORDER_NUMBER.test(rawNumber) ? rawNumber : newOrderNumber();
 
   // Файлы: только ожидаемые поля, по одному на поле, нужного типа и размера.
+  const rawOrderLines: unknown[] = Array.isArray(raw.lines) ? raw.lines : [];
   const files: OrderFile[] = [];
   const seen = new Set<string>();
+  let totalSize = 0;
   for (const [key, v] of form.entries()) {
     if (typeof v === 'string') continue;
     const rule = FILE_RULES.find((r) => r.key.test(key));
@@ -80,7 +99,14 @@ export async function parseOrder(req: Request): Promise<Order> {
     seen.add(key);
     if (!rule.types.includes(v.type) || v.size === 0) throw new BadOrder('bad_file');
     if (v.size > rule.maxMb * MB) throw new BadOrder('file_too_large', 413);
-    files.push({ title: rule.title(key.match(rule.key)!), name: `${number}_${safeName(v.name, key)}`, file: v });
+    totalSize += v.size;
+    if (totalSize > TOTAL_MAX_MB * MB) throw new BadOrder('file_too_large', 413);
+    const m = key.match(rule.key)!;
+    // Превью по цветам: индекс — номер строки заявки, в подписи нужен её цвет.
+    const pv = key.match(PREVIEW_KEY);
+    const color = pv ? str(obj(rawOrderLines[Number(pv[1])]).color, 60) : '';
+    const title = pv ? `Макет на изделии: ${color ? `${color}, ` : ''}${SIDE_NAME[pv[2]]}` : rule.title(m);
+    files.push({ title, name: `${number}_${safeName(v.name, key)}`, file: v });
   }
   if (![...seen].some((k) => k.startsWith('print_'))) throw new BadOrder('no_print_file');
 
@@ -98,17 +124,25 @@ export async function parseOrder(req: Request): Promise<Order> {
   const method = str(raw.method, 8);
   if (!METHODS.includes(method)) throw new BadOrder('bad_method');
 
-  // Количество считаем сами из размеров; итог — цена за штуку из расчёта конструктора × количество.
-  const sizes = Object.entries(obj(raw.sizes))
-    .slice(0, 40)
-    .map(([k, n]): [string, number] => [str(k, 12), Math.round(Number(n))])
-    .filter(([k, n]) => k && n > 0 && n <= 999);
-  const qty = sizes.reduce((s, [, n]) => s + n, 0);
-  if (!qty) throw new BadOrder('no_sizes');
+  // Количество считаем сами из размеров; итог — сумма по цветам: цена за штуку из расчёта конструктора × количество.
+  const rawLines = rawOrderLines.slice(0, MAX_LINES).map(obj);
+  const lines: OrderLine[] = [];
+  rawLines.forEach((l) => {
+    const sizes = Object.entries(obj(l.sizes))
+      .slice(0, 40)
+      .map(([k, n]): [string, number] => [str(k, 12), Math.round(Number(n))])
+      .filter(([k, n]) => k && n > 0 && n <= 999);
+    const qty = sizes.reduce((s, [, n]) => s + n, 0);
+    if (!qty) return;
+    const perItem = Math.round(Number(l.perItem));
+    if (!Number.isFinite(perItem) || perItem < 0) throw new BadOrder('bad_price');
+    lines.push({ color: str(l.color, 60), sizes, qty, perItem, total: perItem * qty });
+  });
+  if (!lines.length) throw new BadOrder('no_sizes');
+  const qty = lines.reduce((s, l) => s + l.qty, 0);
+  const total = lines.reduce((s, l) => s + l.total, 0);
 
   const price = obj(raw.price);
-  const perItem = Math.round(Number(price.perItem));
-  if (!Number.isFinite(perItem) || perItem < 0) throw new BadOrder('bad_price');
   const sides = (Array.isArray(price.sides) ? price.sides : [])
     .map(obj)
     .filter((x) => typeof x.side === 'string' && x.side in SIDE_NAME)
@@ -125,8 +159,8 @@ export async function parseOrder(req: Request): Promise<Order> {
 
   return {
     number,
-    garment: { name: str(garment.name, 120), color: str(garment.color, 60) },
-    method, sizes, qty, perItem, total: perItem * qty, sides, contacts, utm,
+    garment: { name: str(garment.name, 120) },
+    method, lines, qty, total, sides, contacts, utm,
     page: /^https?:\/\//.test(str(raw.page, 300)) ? str(raw.page, 300) : '',
     files,
   };
@@ -138,10 +172,10 @@ export function orderText(o: Order): string {
   const utm = Object.entries(o.utm).map(([k, v]) => `${k}=${v}`).join(', ');
   return [
     `🧩 Заявка из конструктора № ${o.number}`,
-    `${o.garment.name}, ${o.garment.color}`,
+    o.garment.name,
     `Нанесение: ${o.method.toUpperCase()} · ${o.sides.join(', ')}`,
-    `Размеры: ${o.sizes.map(([k, n]) => `${k}×${n}`).join(', ')} (всего ${o.qty})`,
-    `Сумма по расчёту конструктора: ${o.total} ₽ (${o.perItem} ₽ за шт)`,
+    ...o.lines.map((l) => `${l.color}: ${l.sizes.map(([k, n]) => `${k}×${n}`).join(', ')} — ${l.qty} шт × ${rub(l.perItem)} = ${rub(l.total)}`),
+    `Всего: ${o.qty} шт, сумма по расчёту конструктора: ${rub(o.total)}`,
     `Клиент: ${c.name}, ${c.phone}, ${c.email}`,
     `Город: ${c.city}${c.address ? `, адрес: ${c.address}` : ''}`,
     c.comment ? `Комментарий: ${c.comment}` : '',

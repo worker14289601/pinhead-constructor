@@ -44,7 +44,7 @@ export async function sendToBitrix(o: Order, webhook: string, categoryId?: strin
 
   const dealId = await call<number>('crm.deal.add', {
     fields: {
-      TITLE: `Конструктор № ${o.number}: ${o.garment.name}, ${o.qty} шт`,
+      TITLE: `Конструктор № ${o.number}: ${o.garment.name}, ${o.qty} шт${o.lines.length > 1 ? `, ${o.lines.length} цв.` : ''}`,
       ...(categoryId ? { CATEGORY_ID: Number(categoryId) } : {}),
       ...(contactId ? { CONTACT_ID: contactId } : {}),
       OPENED: 'Y',

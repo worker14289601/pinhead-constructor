@@ -85,7 +85,7 @@ export function GarmentPicker({ garments, garmentId, variant, onSelect }: {
       )}
 
       {current && variant && (
-        <div className={s.about}>
+        <div className={s.about} key={current.id}>
           {about && (
             <>
               <p className={more ? s.aboutTextOpen : s.aboutText}>{about}</p>

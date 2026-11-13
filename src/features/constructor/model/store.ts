@@ -36,7 +36,12 @@ interface ConstructorState {
   layers: DesignLayer[];
   selectedLayerId: string | null;
   method: PrintMethod;
-  sizes: SizeQuantities;
+  /**
+   * Количество по размерам для каждого цвета (ключ — productId). Принт один, а размеры у каждого цвета свои:
+   * в заявку идут все цвета текущей модели, по которым что-то набрано. Количество у цветов других моделей
+   * сохраняется, чтобы при возврате к модели оно было на месте, но в заявку не идёт.
+   */
+  quantities: Record<string, SizeQuantities>;
   past: Snapshot[];
   future: Snapshot[];
   /** Растёт, когда загрузился шрифт: слои и цена перерисовываются с настоящими метриками. */
@@ -60,9 +65,14 @@ interface ConstructorState {
   undo: () => void;
   redo: () => void;
   setMethod: (m: PrintMethod) => void;
+  /** Количество размера у выбранного цвета. */
   setSizeQty: (size: string, qty: number) => void;
   /** Прибавить/убавить от текущего значения — безопасно при быстрых нажатиях. */
   incSize: (size: string, delta: number) => void;
+  /** Взять размеры другого цвета для выбранного: только те, что есть у выбранного. */
+  copySizes: (fromProductId: string) => void;
+  /** Убрать цвет из заявки — обнулить его количество. */
+  clearSizes: (productId: string) => void;
 }
 
 let lastMerge: { key: string; at: number } | null = null;
@@ -105,7 +115,7 @@ export const useConstructor = create<ConstructorState>((set, get) => {
     layers: [],
     selectedLayerId: null,
     method: 'dtf',
-    sizes: {},
+    quantities: {},
     past: [],
     future: [],
     fontTick: 0,
@@ -124,8 +134,7 @@ export const useConstructor = create<ConstructorState>((set, get) => {
         variantId: v?.productId ?? null,
         side: sideOk ? d.side : 'front',
         method: d.method,
-        // Количество — только по размерам, которые есть у выбранного цвета.
-        sizes: Object.fromEntries(Object.entries(d.sizes).filter(([k]) => v?.sizes.includes(k))),
+        quantities: d.quantities,
         layers: d.layers,
         selectedLayerId: null,
         past: [],
@@ -137,16 +146,13 @@ export const useConstructor = create<ConstructorState>((set, get) => {
     selectGarment: (id) => {
       const g = get().garments.find((x) => x.id === id) ?? null;
       const side = sidesFor(g).includes(get().side) ? get().side : 'front';
-      set({ garmentId: id, variantId: g?.variants[0]?.productId ?? null, sizes: {}, side });
+      // Открываем цвет, по которому уже что-то набрано, — иначе первый.
+      const q = get().quantities;
+      const v = g?.variants.find((x) => Object.values(q[x.productId] ?? {}).some((n) => n > 0)) ?? g?.variants[0];
+      set({ garmentId: id, variantId: v?.productId ?? null, side });
     },
-    // У цветов одной модели набор размеров может отличаться: количество по размерам,
-    // которых у нового цвета нет, убираем — иначе оно незаметно осталось бы в сумме и заявке.
-    selectVariant: (variantId) =>
-      set((s) => {
-        const v = selectGarment(s)?.variants.find((x) => x.productId === variantId);
-        const sizes = v ? Object.fromEntries(Object.entries(s.sizes).filter(([k]) => v.sizes.includes(k))) : s.sizes;
-        return { variantId, sizes };
-      }),
+    // Размеры у каждого цвета свои: при смене цвета ничего не переносим, скопировать можно кнопкой (copySizes).
+    selectVariant: (variantId) => set({ variantId }),
     setSide: (side) => set({ side, selectedLayerId: null }),
 
     addImage: (img) => {
@@ -212,12 +218,34 @@ export const useConstructor = create<ConstructorState>((set, get) => {
     redo: () => travel('future'),
 
     setMethod: (method) => set({ method }),
-    setSizeQty: (size, qty) =>
-      set((s) => ({ sizes: { ...s.sizes, [size]: Math.max(0, Math.min(999, Math.round(qty) || 0)) } })),
-    incSize: (size, delta) =>
-      set((s) => ({ sizes: { ...s.sizes, [size]: Math.max(0, Math.min(999, (s.sizes[size] ?? 0) + delta)) } })),
+    setSizeQty: (size, qty) => set((s) => withSize(s, size, () => qty)),
+    incSize: (size, delta) => set((s) => withSize(s, size, (cur) => cur + delta)),
+    copySizes: (from) =>
+      set((s) => {
+        const v = selectVariant(s);
+        if (!v) return {};
+        const src = s.quantities[from] ?? {};
+        const sizes = Object.fromEntries(v.sizes.filter((k) => (src[k] ?? 0) > 0).map((k) => [k, src[k]]));
+        return { quantities: { ...s.quantities, [v.productId]: sizes } };
+      }),
+    clearSizes: (productId) =>
+      set((s) => {
+        const quantities = { ...s.quantities };
+        delete quantities[productId];
+        return { quantities };
+      }),
   };
 });
+
+/** Новое количество размера у выбранного цвета: целое 0…999. */
+function withSize(s: ConstructorState, size: string, next: (cur: number) => number) {
+  if (!s.variantId) return {};
+  const cur = s.quantities[s.variantId] ?? {};
+  const qty = Math.max(0, Math.min(999, Math.round(next(cur[size] ?? 0)) || 0));
+  return { quantities: { ...s.quantities, [s.variantId]: { ...cur, [size]: qty } } };
+}
+
+const NO_SIZES: SizeQuantities = {};
 
 /** Удобные селекторы. */
 export function selectGarment(s: Pick<ConstructorState, 'garments' | 'garmentId'>) {
@@ -225,5 +253,10 @@ export function selectGarment(s: Pick<ConstructorState, 'garments' | 'garmentId'
 }
 export const selectVariant = (s: ConstructorState) =>
   selectGarment(s)?.variants.find((v) => v.productId === s.variantId) ?? null;
+/** Количество по размерам у выбранного цвета. */
+export const selectSizes = (s: ConstructorState) => (s.variantId && s.quantities[s.variantId]) || NO_SIZES;
+/** Сколько штук набрано у цвета — только по размерам, которые у него есть. */
+export const variantQty = (q: Record<string, SizeQuantities>, v: { productId: string; sizes: string[] }) =>
+  v.sizes.reduce((sum, k) => sum + (q[v.productId]?.[k] ?? 0), 0);
 export const canUndo = (s: ConstructorState) => s.past.length > 0;
 export const canRedo = (s: ConstructorState) => s.future.length > 0;

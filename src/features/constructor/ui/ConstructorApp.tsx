@@ -13,7 +13,7 @@ import { clearDraft, hasContent, loadDraft, saveDraft, type Draft } from '../mod
 import { ensureFont, onFontLoaded } from '../model/fonts';
 import { calcPrice } from '../model/pricing';
 import { validateFile, ACCEPTED_TYPES } from '../model/quality';
-import { canRedo, canUndo, selectGarment, selectVariant, useConstructor } from '../model/store';
+import { canRedo, canUndo, selectGarment, selectVariant, useConstructor, variantQty } from '../model/store';
 import { contentBox } from '../model/trim';
 import { SIDE_LABEL, SIDE_TAB } from '../model/types';
 import type { DesignStageHandle } from '../canvas/DesignStage';
@@ -119,14 +119,14 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
     if (draftGate !== 'open') return;
     const t = setTimeout(async () => {
       const r = await saveDraft({
-        garmentId: st.garmentId, variantId: st.variantId, side: st.side, method: st.method, sizes: st.sizes, layers: st.layers,
+        garmentId: st.garmentId, variantId: st.variantId, side: st.side, method: st.method, quantities: st.quantities, layers: st.layers,
       });
       if (r === 'no-images') setNotice('Черновик сохранён без картинок: не хватило места в браузере.');
       else if (r === 'failed') setNotice('Не получилось сохранить черновик в браузере.');
       else setNotice(null);
     }, 800);
     return () => clearTimeout(t);
-  }, [draftGate, st.garmentId, st.variantId, st.side, st.method, st.sizes, st.layers]);
+  }, [draftGate, st.garmentId, st.variantId, st.side, st.method, st.quantities, st.layers]);
 
   // Шрифты текстовых слоёв: грузим по мере появления, после загрузки пересчитываем габарит.
   const fontKey = st.layers.flatMap((l) => (l.kind === 'text' ? [`${l.fontFamily}|${l.bold}|${l.italic}|${l.text}`] : [])).join('\n');
@@ -143,11 +143,15 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
     if (!variant || !garment) return null;
     // Габарит — только по сторонам модели: печать на рукаве у шоппера в цену не идёт.
     const bounds = designBounds(garment, st.layers);
-    const isWhite = hexToRgb(hex).every((c) => c >= WHITE_MIN_CHANNEL);
-    return calcPrice({ garmentPrice: variant.price, isWhite, method: st.method, bounds, sizes: st.sizes });
+    const variants = garment.variants.map((v) => ({
+      productId: v.productId, color: v.colorName, hex: v.hex, garmentPrice: v.price,
+      isWhite: hexToRgb(v.hex).every((c) => c >= WHITE_MIN_CHANNEL),
+      sizeNames: v.sizes, sizes: st.quantities[v.productId] ?? {},
+    }));
+    return calcPrice({ method: st.method, bounds, variants, currentId: variant.productId });
     // fontTick: габарит текста зависит от загруженного шрифта.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [variant, garment, hex, st.method, st.layers, st.sizes, st.fontTick]);
+  }, [variant, garment, st.method, st.layers, st.quantities, st.fontTick]);
 
   const onFile = (f?: File) => {
     if (!f || !garment) return;
@@ -239,18 +243,23 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
           {garment && garment.variants.length > 0 && (
             <div className={s.colorBar} role="radiogroup" aria-label="Цвет изделия">
               <div className={s.colors}>
-                {garment.variants.map((v) => (
+                {garment.variants.map((v) => {
+                  const n = variantQty(st.quantities, v);
+                  return (
                   <button
                     key={v.productId}
                     role="radio"
                     aria-checked={v.productId === st.variantId}
                     className={v.productId === st.variantId ? s.swatchActive : s.swatch}
                     style={{ background: v.hex }}
-                    title={v.colorName}
-                    aria-label={v.colorName}
+                    title={n ? `${v.colorName} — ${n} шт в заявке` : v.colorName}
+                    aria-label={n ? `${v.colorName}, ${n} шт` : v.colorName}
                     onClick={() => { st.selectVariant(v.productId); track('color_select', { color: v.colorName }); }}
-                  />
-                ))}
+                  >
+                    {n > 0 && <span className={s.swatchCount} aria-hidden>{n > 99 ? '99+' : n}</span>}
+                  </button>
+                  );
+                })}
               </div>
             </div>
           )}

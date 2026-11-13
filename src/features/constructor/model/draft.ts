@@ -12,7 +12,8 @@ export interface Draft {
   variantId: string | null;
   side: Side;
   method: PrintMethod;
-  sizes: SizeQuantities;
+  /** Количество по размерам для каждого цвета (ключ — productId). */
+  quantities: Record<string, SizeQuantities>;
   layers: DesignLayer[];
   savedAt: number;
   /** Картинки в черновик не поместились — их придётся загрузить заново. */
@@ -40,7 +41,9 @@ async function toDataUrl(src: string): Promise<string> {
   return url;
 }
 
-const isEmpty = (s: DraftState) => !s.layers.length && !Object.values(s.sizes).some((n) => n > 0);
+const anyQty = (q: Record<string, SizeQuantities> | undefined) =>
+  Object.values(q ?? {}).some((sizes) => Object.values(sizes).some((n) => n > 0));
+const isEmpty = (s: DraftState) => !s.layers.length && !anyQty(s.quantities);
 
 function write(d: Draft): boolean {
   try {
@@ -73,8 +76,11 @@ export function loadDraft(): Draft | null {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
-    const d = JSON.parse(raw) as Draft;
+    const d = JSON.parse(raw) as Draft & { sizes?: SizeQuantities };
     if (!d || !Array.isArray(d.layers)) return null;
+    // Старые черновики: размеры были общими — относим их к сохранённому цвету.
+    if (!d.quantities) d.quantities = d.sizes && d.variantId ? { [d.variantId]: d.sizes } : {};
+    delete d.sizes;
     // Поля текста, которых не было в старых черновиках, добираем значениями по умолчанию.
     d.layers = d.layers.map((l) => (l.kind === 'text'
       ? Object.assign({ fontFamily: DEFAULT_FONT, bold: false, italic: false, lineHeight: 1.1, strokeWidth: 0, strokeColor: '#ffffff', arc: 0 }, l)
@@ -90,4 +96,4 @@ export function clearDraft() {
 }
 
 /** В черновике есть что продолжать. */
-export const hasContent = (d: Draft) => !!d.layers.length || Object.values(d.sizes ?? {}).some((n) => n > 0) || d.imagesDropped;
+export const hasContent = (d: Draft) => !!d.layers.length || anyQty(d.quantities) || d.imagesDropped;

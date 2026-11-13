@@ -67,7 +67,7 @@ export function DesignPanel({ stage, fileError, onUpload, onAddText }: Props) {
       {fileError && <p className={s.err}>{fileError}</p>}
 
       {selected && (
-        <div className={d.body}>
+        <div className={d.body} key={selected.id}>
           <div className={d.head}>
             <span className={d.chip}>
               <span className={d.chipIcon}><Icon name={selected.kind === 'text' ? 'text' : 'image'} size={18} /></span>

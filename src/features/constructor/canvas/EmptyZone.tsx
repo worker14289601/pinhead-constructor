@@ -80,6 +80,7 @@ export function EmptyZone({ rect, dragging, sizeText, outline, tone = 'dark', on
     <div className={c.emptyRoot} style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}>
       <button
         type="button"
+        data-still=""
         className={cls}
         aria-label="Загрузить картинку"
         style={{ ...(clip ? { clipPath: clip } : null), touchAction: panEnabled ? 'none' : undefined }}
