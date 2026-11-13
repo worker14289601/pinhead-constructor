@@ -370,6 +370,8 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = fal
   // не гонялась за слоем, пока его тащат.
   // Там же — габарит принта в долях зоны: крупный принт должен поместиться в холст целиком (с кнопками).
   const anchorRef = useRef<{ key: string | null; v: number; w: number; h: number }>({ key: null, v: 0.5, w: 0, h: 0 });
+  // Фокус снят — забываем точку: слой могли передвинуть, при новом выборе камера встанет на его текущее место.
+  if (!focusOn) anchorRef.current.key = null;
   const focusAnchor = (key: string | null) => {
     if (anchorRef.current.key !== key) {
       let v = 0.5, w = 0, h = 0;
