@@ -54,8 +54,13 @@
   .layer:hover .actions, .layer:focus-within .actions, .layerActive .actions { opacity: 1; }
 }
 @media (max-width: 900px) {
-  .act { width: 38px; height: 38px; }
+  .act { width: 32px; height: 32px; }
   .collapse { display: none; }
+  .layer, .layerActive { padding: 3px; border-radius: 8px; }
+  .main { gap: 8px; }
+  .name { font-size: 13px; }
+  .empty { padding: 10px; font-size: 12px; }
+  .count { font-size: 11px; padding: 1px 6px; }
 }
 
 /* ---------- Нанесение ---------- */
@@ -107,15 +112,25 @@
 .total b { color: var(--ink); font-variant-numeric: tabular-nums; }
 @media (max-width: 900px) {
   /* Компактные плитки: 3 в ряд на 375px, кнопки 34px (между ними число — промахнуться трудно) */
-  .sizes { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
-  .size, .sizeActive { gap: 4px; padding: 6px; }
+  .sizes { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+  .size, .sizeActive { gap: 3px; padding: 5px; border-radius: 8px; }
   .sizeName { font-size: 13px; padding-left: 2px; }
-  .step { grid-template-columns: 34px minmax(0, 1fr) 34px; gap: 0; }
-  .step button { height: 34px; }
-  .step input { font-size: 16px; height: 34px; }
-  .chartLink { padding: 10px; margin: -10px -10px -10px 0; }
-  .segBtn, .segBtnActive { padding: 8px 6px; min-height: 48px; }
-  .card { padding: 12px; }
+  .step { grid-template-columns: 28px minmax(0, 1fr) 28px; gap: 0; }
+  .step button { height: 28px; }
+  /* 16px: меньше — iOS приближает страницу при фокусе в поле */
+  .step input { font-size: 16px; height: 28px; }
+  .chartLink { padding: 8px; margin: -8px -8px -8px 0; font-size: 12px; }
+  .segBtn, .segBtnActive { padding: 5px 6px; min-height: 40px; font-size: 13px; }
+  .card { padding: 10px; gap: 6px; font-size: 12px; border-radius: 10px; }
+  .row { font-size: 13px; gap: 8px; }
+  .lineMain { padding: 6px 8px; gap: 8px; }
+  .lineName, .lineSum { font-size: 13px; }
+  .lineDel { width: 32px; }
+  .copyBtn { padding: 5px 8px; }
+  .footer { padding-left: 12px; padding-right: 12px; }
+  .button { min-height: 44px; padding: 0 14px; font-size: 13px; }
+  .sub { margin-top: 4px; }
+  .subRow { margin-top: 4px; }
 }
 
 /* ---------- Разбивка цены ---------- */

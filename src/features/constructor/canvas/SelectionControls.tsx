@@ -12,10 +12,12 @@ import { centerOf, keepCenter, minScale, snapRotation, type Pt } from './gesture
  * Пока кнопку тянут, меняется только узел холста; в стор правка уходит одним шагом при отпускании.
  */
 
-/** Размер кнопки, px (на сенсорных экранах CSS делает её крупнее). */
-const BTN = 32;
+/** Сенсорный экран: кнопки компактнее (28 px в CSS), ножка короче. */
+const COARSE = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches;
+/** Размер кнопки, px — как в controls.module.css. */
+const BTN = COARSE ? 28 : 32;
 /** Длина «ножки» от верхнего края принта до центра кнопки поворота, px. */
-const STEM = 48;
+const STEM = COARSE ? 36 : 48;
 /** Угловые кнопки вынесены наружу на столько по каждой оси — не закрывают принт и не налезают друг на друга. */
 const OUT = BTN / 2 + 2;
 
@@ -151,7 +153,7 @@ export function SelectionControls({ stage, layer, area, size, minPx, accent, cap
     onCommit(layer.kind === 'image' ? { ...base, width: (node.width() * sx) / area.w } : { ...base, fontSize: layer.fontSize * sx });
   };
 
-  // Кнопка центрируется на точке через CSS: под палец она крупнее, чем BTN.
+  // Кнопка центрируется на точке через CSS (translate -50%).
   const at = (p: Pt) => ({ left: p.x, top: p.y });
   const handlers = (mode: Gesture['mode']) => ({
     onPointerDown: start(mode), onPointerMove: move, onPointerUp: end, onPointerCancel: end,

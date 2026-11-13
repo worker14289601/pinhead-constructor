@@ -4,7 +4,8 @@ import type { Side } from '../model/types';
  * Анимация «поворота» изделия при смене стороны. Мокапы плоские, поэтому поворот имитируется одной
  * непрерывной дугой: прежняя сторона (снимок) доворачивается до ребра, затемняясь и приближаясь, а из ребра
  * выходит новая. В каждый момент виден один непрозрачный слой.
- * Двигаются только HTML-элементы поверх холста (transform, opacity, filter): сцена Konva, экспорт и
+ * Двигаются только HTML-элементы поверх холста (transform, opacity — без filter: его Safari перерисовывает
+ * на каждом кадре, и на телефоне поворот дёргается): сцена Konva, экспорт и
  * файл печати не затрагиваются, раскладка не пересчитывается.
  */
 
@@ -31,7 +32,7 @@ export const prefersReducedMotion = () =>
 export const isHalfTurn = (from: Side, to: Side) => Math.abs(AZIMUTH[to] - AZIMUTH[from]) === 180;
 
 /** Поза, в которой застал повторный клик прерванный поворот: следующий начинается с неё, без скачка. */
-let lastPose: { transform: string; filter: string; at: number } | null = null;
+let lastPose: { transform: string; at: number } | null = null;
 
 type Frame = Keyframe & { offset: number };
 
@@ -57,21 +58,21 @@ export function playTurn(
   const easeOut = 'cubic-bezier(.15,.45,.5,1)';
 
   // Повторный клик посреди поворота, когда новая сторона уже выходит: продолжаем с её позы без скачка.
-  let pose: { transform: string; filter: string } | null = null;
+  let pose: { transform: string } | null = null;
   if (lastPose && performance.now() - lastPose.at < 80) pose = lastPose;
   lastPose = null;
 
   const oldFrames: Frame[] = [
-    { offset: 0, transform: pose?.transform ?? tf(0, 1, 0), filter: pose?.filter ?? 'brightness(1)', opacity: 1, easing: easeIn },
-    { offset: 0.499, transform: tf(-sign * EDGE, 1.1, -sign * 14), filter: 'brightness(.55)', opacity: 1 },
-    { offset: 0.5, transform: tf(-sign * EDGE, 1.1, -sign * 14), filter: 'brightness(.55)', opacity: 0 },
-    { offset: 1, transform: tf(-sign * EDGE, 1.1, -sign * 14), filter: 'brightness(.55)', opacity: 0 },
+    { offset: 0, transform: pose?.transform ?? tf(0, 1, 0), opacity: 1, easing: easeIn },
+    { offset: 0.499, transform: tf(-sign * EDGE, 1.1, -sign * 14), opacity: 1 },
+    { offset: 0.5, transform: tf(-sign * EDGE, 1.1, -sign * 14), opacity: 0 },
+    { offset: 1, transform: tf(-sign * EDGE, 1.1, -sign * 14), opacity: 0 },
   ];
   const newFrames: Frame[] = [
-    { offset: 0, transform: tf(sign * EDGE, 1.1, sign * 14), filter: 'brightness(.55)', opacity: 0 },
-    { offset: 0.499, transform: tf(sign * EDGE, 1.1, sign * 14), filter: 'brightness(.55)', opacity: 0 },
-    { offset: 0.5, transform: tf(sign * EDGE, 1.1, sign * 14), filter: 'brightness(.55)', opacity: 1, easing: easeOut },
-    { offset: 1, transform: tf(0, 1, 0), filter: 'brightness(1)', opacity: 1 },
+    { offset: 0, transform: tf(sign * EDGE, 1.1, sign * 14), opacity: 0 },
+    { offset: 0.499, transform: tf(sign * EDGE, 1.1, sign * 14), opacity: 0 },
+    { offset: 0.5, transform: tf(sign * EDGE, 1.1, sign * 14), opacity: 1, easing: easeOut },
+    { offset: 1, transform: tf(0, 1, 0), opacity: 1 },
   ];
 
   const out = oldEl.animate(oldFrames, timing);
@@ -134,7 +135,7 @@ export function playTurn(
       // Новая сторона уже выходит (вторая половина) — запоминаем её позу, следующий поворот продолжит её.
       if (!done && inn.playState === 'running') {
         const cs = getComputedStyle(newEl);
-        if (Number(cs.opacity) > 0.5 && cs.transform !== 'none') lastPose = { transform: cs.transform, filter: cs.filter, at: performance.now() };
+        if (Number(cs.opacity) > 0.5 && cs.transform !== 'none') lastPose = { transform: cs.transform, at: performance.now() };
       }
       cleanup();
       resolveFinish();

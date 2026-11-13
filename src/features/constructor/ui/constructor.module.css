@@ -41,7 +41,14 @@
 @media (min-width: 901px) {
   :global(html):has(.app), :global(html):has(.app) :global(body) { overflow: hidden; overscroll-behavior: none; }
 }
-.app button { font: inherit; color: inherit; }
+/* Кнопки берут шрифт страницы. На телефоне — с нулевым весом селектора (:where), чтобы размеры шрифта
+   из классов компактной мобильной версии не перебивались. */
+@media (min-width: 901px) { .app button { font: inherit; color: inherit; } }
+@media (max-width: 900px) {
+  :where(.app) button { font: inherit; color: inherit; }
+  /* Из классов берём только размер шрифта; начертание — как на десктопе. */
+  .app button { font-family: inherit; font-weight: inherit; font-style: inherit; }
+}
 .app *:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 
 .panel { background: #fff; overflow-y: auto; overscroll-behavior: contain; min-height: 0; border: 1px solid var(--ink); border-radius: var(--r-card); }
@@ -227,27 +234,27 @@
   .app[data-kb] { height: var(--vvh, 100dvh); }
 
   .center {
-    height: 52dvh; padding: 8px 8px 6px; padding-top: max(8px, env(safe-area-inset-top));
+    height: 54dvh; gap: 6px; padding: 6px 8px 4px; padding-top: max(6px, env(safe-area-inset-top));
     transition: height var(--t-base) var(--ease-out);
   }
   /* Редактирование слоя: высота холста та же (иначе холст меняет размер под пальцем, пока тащишь принт) —
      вместо этого изделие приближается к принту (DesignStage, focus). */
   /* Размеры: принт уже готов, изделие — для сверки; степперам нужно место. */
-  .app[data-tab='order'] .center { height: 40dvh; }
+  .app[data-tab='order'] .center { height: 42dvh; }
   /* Набор текста: только изделие над клавиатурой, без панели цвета и масштаба. */
   .center { overflow: hidden; }
   .app[data-kb] .center { height: calc(var(--vvh, 100dvh) * .45); transition: none; }
   .app[data-kb] :is(.sides, .toolbar, .tabbar, .footer) { display: none; }
 
-  .sides { gap: 4px; flex-wrap: nowrap; }
-  .tab, .tabActive { flex: 1 1 0; min-width: 0; min-height: 40px; padding: 6px 4px; font-size: 12px; }
+  .sides { gap: 3px; flex-wrap: nowrap; }
+  .tab, .tabActive { flex: 1 1 0; min-width: 0; min-height: 32px; padding: 3px 2px; font-size: 13px; border-radius: 4px; }
   .tabbar {
-    grid-area: tabbar; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 6px 8px;
+    grid-area: tabbar; display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; padding: 4px 8px;
     z-index: 2; background: var(--paper); border-top: 1px solid var(--line); border-bottom: 1px solid var(--ink);
   }
   .tabbarBtn, .tabbarActive {
-    min-height: 44px; padding: 0 4px; border: 1px solid var(--ink); border-radius: var(--r-ctl); background: #fff;
-    font-size: 12px; font-weight: 800; text-transform: uppercase; cursor: pointer;
+    min-height: 34px; padding: 0 2px; border: 1px solid var(--ink); border-radius: 4px; background: #fff;
+    font-size: 13px; font-weight: 800; text-transform: uppercase; cursor: pointer;
   }
   .tabbarActive { background: var(--graphite); border-color: var(--graphite); color: var(--lime) !important; }
 
@@ -256,20 +263,22 @@
   /* Каждая вкладка прокручивается в своей строке сетки; прокрутка не утекает на страницу. */
   .left, .section {
     grid-area: panel; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
-    border: 0; padding: 16px 16px 24px; background: #fff;
+    border: 0; padding: 12px 12px 16px; gap: 8px; background: #fff;
   }
   .section + .section { border: 0; }
   /* Панель — колонка фиксированной высоты: блоки внутри не сжимаются, а прокручиваются. */
   .left > *, .section > *, .section .full > * { flex-shrink: 0; }
   /* Шапка редактора слоя прилипает к самому верху своей панели: липкий отступ считается от края
      внутри padding прокручиваемой панели, поэтому — минус отступ. */
-  .section { --pad: 16px; --edit-top: -16px; }
+  .section { --pad: 12px; --edit-top: -12px; }
+  .h { margin: 2px 0 0; font-size: 14px; }
+  .muted, .err, .warn { font-size: 12px; }
   /* Поле в фокусе не прячется под закреплённую шапку редактора. */
-  .section :is(input, textarea) { scroll-margin-top: 76px; scroll-margin-bottom: 12px; }
+  .section :is(input, textarea) { scroll-margin-top: 60px; scroll-margin-bottom: 12px; }
   /* На мобильном разделы — вкладки: сводки не нужны, каждая вкладка показывает своё целиком. */
   .right[data-editing] .full { display: contents; }
   .right[data-editing] .summary { display: none; }
-  .right[data-editing] .section:not([data-section='design']) { padding: 16px 16px 24px; }
+  .right[data-editing] .section:not([data-section='design']) { padding: 12px 12px 16px; }
   .app[data-tab='garment'] :is([data-section='design'], [data-section='layers'], [data-section='order']),
   .app[data-tab='design'] :is([data-section='garment'], [data-section='layers'], [data-section='order']),
   .app[data-tab='layers'] :is([data-section='garment'], [data-section='design'], [data-section='order']),
@@ -277,14 +286,22 @@
   /* Сворачивание слоёв — только на десктопе */
   .layers[hidden] { display: flex; }
 
-  .footer { grid-area: footer; position: relative; z-index: 3; margin: 0; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); flex-wrap: nowrap; }
-  .footer .cta { flex: none; min-height: 48px; }
+  .footer { grid-area: footer; position: relative; z-index: 3; margin: 0; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); gap: 10px; flex-wrap: nowrap; }
+  .footer .cta { flex: none; min-height: 44px; padding: 0 14px; font-size: 13px; }
   /* Узкий экран: у масштаба без процентов — только «−/+»; кнопки не меньше 40 px под палец. */
-  .toolbar { --seg-h: 40px; gap: 6px; }
-  .history button, .zoom button { min-width: 42px; padding: 0 6px; }
-  .colorBar { padding: 0 8px; }
-  .colors { gap: 14px; }
-  .swatch, .swatchActive { width: 26px; height: 26px; }
+  .toolbar { --seg-h: 32px; gap: 6px; }
+  .history button, .zoom button { min-width: 34px; padding: 0 4px; font-size: 14px; }
+  .history button svg, .zoom button svg { width: 16px; height: 16px; }
+  .colorBar { padding: 0 6px; }
+  .colors { gap: 10px; }
+  .swatch, .swatchActive { width: 22px; height: 22px; }
+  .swatchCount { top: -5px; right: -6px; min-width: 13px; height: 13px; font-size: 8px; line-height: 13px; }
+  .thumb { width: 30px; height: 30px; font-size: 12px; }
+  .sumRow { min-height: 36px; padding: 5px 10px 5px 12px; }
+  .chart th, .chart td { padding: 5px 4px; }
+  .chart { font-size: 13px; }
+  .check { font-size: 12px; }
+  .btn { padding: 10px 10px; }
   .zoom .zoomValue { display: none; }
 }
 
@@ -355,16 +372,21 @@
 
 /* Телефон: типы и модели — горизонтальные ленты, чтобы панель под холстом не уходила на три экрана */
 @media (max-width: 900px) {
-  .types { flex-direction: row; overflow-x: auto; border: 0; border-radius: 0; gap: 6px; scrollbar-width: none; margin: 0 -16px; padding: 0 16px; }
+  .types { flex-direction: row; overflow-x: auto; border: 0; border-radius: 0; gap: 6px; scrollbar-width: none; margin: 0 -12px; padding: 0 12px; }
   .types::-webkit-scrollbar { display: none; }
   .type, .typeActive {
-    flex: none; width: 96px; grid-template-columns: 1fr; justify-items: center; gap: 4px; padding: 8px 4px;
-    border: 1px solid var(--ink); border-radius: 10px; text-align: center; font-size: 13px;
+    flex: none; width: clamp(76px, 22vw, 88px); grid-template-columns: 1fr; justify-items: center; gap: 2px; padding: 5px 4px;
+    border: 1px solid var(--ink); border-radius: 8px; text-align: center; font-size: 12px;
   }
+  .typeIcon { width: 30px; height: 30px; border-radius: 6px; }
+  .type small, .typeActive small { font-size: 11px; }
   .type + .type, .type + .typeActive, .typeActive + .type { border-top: 1px solid var(--ink); }
   .typeActive { border-color: var(--graphite); }
-  .models { flex-direction: row; flex-wrap: wrap; }
-  .model, .modelActive { flex: 1 1 auto; }
+  .models { flex-direction: row; flex-wrap: wrap; gap: 5px; }
+  .model, .modelActive { flex: 1 1 auto; padding: 7px 10px; gap: 8px; border-radius: 8px; font-size: 13px; }
+  .about { padding: 10px; gap: 8px; border-radius: 10px; }
+  .aboutText, .aboutTextOpen { font-size: 12px; }
+  .sizeChip { padding: 3px 7px; }
 }
 .layers[hidden] { display: none; }
 @media (max-width: 900px) { .desktopOnly { display: none; } }
@@ -375,7 +397,7 @@
 
 /* Короткое сообщение внизу экрана */
 .notice {
-  position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); z-index: 9; max-width: calc(100% - 32px);
+  position: fixed; left: 50%; bottom: 72px; transform: translateX(-50%); z-index: 9; max-width: calc(100% - 32px);
   padding: 10px 14px; border-radius: var(--r-ctl); background: var(--ink); color: #fff; font-size: 13px; text-align: center;
 }
 

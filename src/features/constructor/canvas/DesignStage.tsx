@@ -18,9 +18,14 @@ import { SelectionControls } from './SelectionControls';
 import { startPinch, type Pt } from './gestures';
 import c from './controls.module.css';
 import { SILHOUETTES, SILHOUETTE_VIEWBOX } from './silhouettes';
-import { isLight, zoneTone, useTintedMockup } from './tint';
+import { isLight, prefetchTints, zoneTone, useTintedMockup } from './tint';
 import { EmptyZone, ZoneBadge } from './EmptyZone';
 import { isHalfTurn, playTurn, prefersReducedMotion, turnSign } from './turn';
+import KonvaLib from 'konva';
+
+// Холст на экране — не плотнее 2×: на iPhone (3×) каждая перерисовка при повороте и жестах в 2,25 раза тяжелее,
+// а разницы на глаз нет. Превью и файл печати задают pixelRatio явно и от этого не зависят.
+if (typeof window !== 'undefined') KonvaLib.pixelRatio = Math.min(2, window.devicePixelRatio || 1);
 
 export interface DesignStageHandle {
   /** PNG текущей стороны с изделием — превью для клиента и менеджера. */
@@ -128,6 +133,13 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = fal
   const shape = garment?.shapeId ? SHAPES[garment.shapeId] : null;
   const hex = variant?.hex ?? '#e4e4e4';
   const mockup = useTintedMockup(shape?.images[side] ?? null, hex);
+  // Текущая сторона готова — остальные стороны в этом цвете готовим заранее, чтобы поворот не ждал.
+  const mockupReady = !!mockup && mockup.url === shape?.images[side];
+  useEffect(() => {
+    if (!mockupReady || !shape) return;
+    return prefetchTints(Object.values(shape.images).filter((u): u is string => !!u && u !== shape.images[side]), hex);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mockupReady, shape, hex]);
   const light = isLight(hex);
   const accent = light ? INK : LIME;
 

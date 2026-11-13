@@ -145,23 +145,28 @@
   /* Шапка: заголовок слева, крестик справа; обе прилипают к верху листа */
   .sheetHead {
     display: flex; align-items: center; position: sticky; top: 0; z-index: 3; flex: none; box-sizing: border-box;
-    min-height: calc(56px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 64px 0 16px;
+    min-height: calc(48px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 56px 0 12px;
     background: #fff; border-bottom: 1px solid var(--ink);
-    font-family: var(--font-head); font-size: 18px; font-weight: 700; text-transform: uppercase;
+    font-family: var(--font-head); font-size: 16px; font-weight: 700; text-transform: uppercase;
   }
   .close {
     /* поверх шапки: она идёт следом в разметке и тоже прилипает */
-    position: sticky; z-index: 4; top: calc(8px + env(safe-area-inset-top)); right: auto; align-self: flex-end; flex: none;
-    width: 44px; height: 44px; margin: calc(8px + env(safe-area-inset-top)) 8px -52px 0;
+    position: sticky; z-index: 4; top: calc(4px + env(safe-area-inset-top)); right: auto; align-self: flex-end; flex: none;
+    width: 40px; height: 40px; margin: calc(4px + env(safe-area-inset-top)) 6px -44px 0;
   }
   .fields h3 { display: none; } /* заголовок есть в шапке; aria-labelledby читает и скрытый */
   .grid { grid-template-columns: 1fr; flex: 1 0 auto; }
-  .summary { border-right: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 16px; gap: 12px; }
-  .product { flex-direction: row; align-items: center; gap: 12px; }
-  .gallery { width: 72px; flex: none; }
+  .summary { border-right: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 12px; gap: 10px; }
+  .product { flex-direction: row; align-items: center; gap: 10px; }
+  .gallery { width: 60px; flex: none; }
+  .productName { font-size: 15px; }
+  .productMeta { font-size: 12px; }
+  .line { padding: 6px 8px; font-size: 13px; }
+  .total { padding-top: 8px; font-size: 13px; }
+  .total b { font-size: 20px; }
   .preview { border-radius: 10px; }
   .gallery .arrow, .gallery .shotSide { display: none; }
-  .zoomBtn { right: -6px; bottom: -6px; width: 28px; height: 28px; }
+  .zoomBtn { right: 3px; bottom: 3px; width: 22px; height: 22px; padding: 3px; }
   .zoom { padding: 12px; }
   .zoomFig { padding: 12px 8px; }
   .zoomFig img { width: calc(100vw - 40px); }
@@ -170,21 +175,25 @@
   .zoomFig .arrowR { right: 6px; }
   .zoomClose { width: 44px; height: 44px; margin: 0; position: absolute; top: 8px; right: 8px; }
   .summary .steps { display: none; }
-  .fields { padding: 16px 16px 0; gap: 16px; }
+  .fields { padding: 12px 12px 0; gap: 12px; }
   .fields { flex: 1; }
-  .group { grid-template-columns: 1fr; }
+  .group { grid-template-columns: 1fr; gap: 10px; }
+  .field { gap: 4px; }
+  .label { font-size: 13px; }
+  .segBtn, .segActive { min-height: 40px; font-size: 12px; }
+  .pickup { padding: 10px 12px; font-size: 13px; }
   .ship { grid-template-columns: 1fr; }
   /* Поля не уезжают под прилипшие шапку и кнопку при прокрутке к ошибке */
-  .field input, .textarea { scroll-margin: 80px 0 150px; min-height: 48px; }
-  .textarea { min-height: 88px; }
+  .field input, .textarea { scroll-margin: 70px 0 130px; min-height: 44px; padding-top: 9px; padding-bottom: 9px; }
+  .textarea { min-height: 76px; }
   .submit {
-    position: sticky; bottom: 0; z-index: 3; margin: auto -16px 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
-    background: #fff; border-top: 1px solid var(--ink);
+    position: sticky; bottom: 0; z-index: 3; margin: auto -12px 0; padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+    background: #fff; border-top: 1px solid var(--ink); gap: 8px;
   }
-  .send { min-height: 52px; }
+  .submit .send { min-height: 46px; padding-top: 0; padding-bottom: 0; }
 
   /* Экран успеха: тоже на весь лист, кнопки внизу */
-  .done { flex: 1; align-items: stretch; padding: 32px 16px calc(16px + env(safe-area-inset-bottom)); }
+  .done { flex: 1; align-items: stretch; padding: 24px 12px calc(12px + env(safe-area-inset-bottom)); }
   .done h3 { padding-right: 48px; }
   .done .doneIcon { align-self: flex-start; }
   .doneActions { grid-template-columns: 1fr; margin-top: auto; padding-top: 16px; }

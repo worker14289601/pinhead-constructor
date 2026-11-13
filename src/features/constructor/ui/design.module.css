@@ -143,18 +143,20 @@
 .fontCardPreview { font-size: 20px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fontCardName { font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* Мобильный вид: панель компактная по высоте, цели касания не меньше 44px */
+/* Мобильный вид: панель компактная по высоте, кнопки 32–36 px */
 @media (max-width: 900px) {
   /* шапка липнет к верху прокручиваемой панели */
-  .editHead { top: var(--edit-top, 0px); padding-top: 8px; padding-bottom: 8px; }
-  .doneBtn { min-height: 44px; }
-  .body { gap: 10px; }
-  .block { gap: 8px; padding-top: 10px; }
-  .badge { padding: 8px 10px; font-size: 12px; }
+  .editHead { top: var(--edit-top, 0px); padding-top: 6px; padding-bottom: 6px; }
+  .chip { font-size: 12px; gap: 6px; padding: 3px 10px 3px 3px; }
+  .chipIcon { width: 24px; height: 24px; border-radius: 6px; }
+  .doneBtn { min-height: 32px; padding: 0 12px; font-size: 12px; }
+  .body { gap: 8px; }
+  .block { gap: 6px; padding-top: 8px; }
+  .badge { padding: 6px 10px; font-size: 12px; }
   .note { font-size: 11px; }
 
   /* >=16px, иначе iOS приближает страницу при фокусе */
-  .textarea { font-size: 16px; min-height: 48px; padding: 8px 12px; }
+  .textarea { font-size: 16px; min-height: 44px; padding: 6px 10px; }
 
   .desktopFont { display: none; }
   .fontStrip {
@@ -170,16 +172,29 @@
   }
   .palette::-webkit-scrollbar { display: none; }
   .palette > * { flex: none; }
-  .dot, .dotActive { width: 36px; height: 36px; }
-  .colorInput { width: 36px; height: 36px; }
-  .customColor { min-height: 44px; }
+  .dot, .dotActive { width: 30px; height: 30px; }
+  .colorInput { width: 30px; height: 30px; }
+  .customColor { min-height: 36px; }
 
-  .segBtn, .segBtn.compact { height: 44px; }
-  .range { gap: 0; }
-  .range input[type='range'] { height: 44px; }
-  .switch { min-height: 44px; }
-  .strokeRow { gap: 10px; align-items: center; }
-  .card, .cardPrimary { min-height: 96px; }
+  .segBtn { height: 36px; }
+  .segBtn.compact { height: 32px; }
+  .range { gap: 0; font-size: 12px; }
+  .range input[type='range'] { height: 32px; }
+  .switch { min-height: 36px; font-size: 12px; }
+  .strokeRow { gap: 8px; align-items: center; }
+  .fontSel { min-height: 42px; padding: 4px 10px; }
+  .fontPreview { font-size: 18px; }
+  .fontCard, .fontCardActive { min-height: 52px; width: 104px; padding: 4px 8px; }
+  .fontCardPreview { font-size: 18px; }
+  .fontOpt, .fontOptActive { min-height: 36px; }
+  .actions { gap: 6px; }
+  .card, .cardPrimary {
+    display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: 'i t' 'i n'; align-content: center;
+    align-items: center; column-gap: 8px; row-gap: 1px; min-height: 60px; padding: 8px 10px; border-radius: 10px;
+  }
+  .card > svg, .cardPrimary > svg { grid-area: i; width: 22px; height: 22px; }
+  .cardTitle { grid-area: t; font-size: 12px; }
+  .cardNote { grid-area: n; margin-top: 0; font-size: 10px; }
 }
 
 /* ─── Движение (токены — в constructor.module.css) ─── */

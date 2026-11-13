@@ -25,9 +25,12 @@
 }
 .btn:focus-visible, .btnAccent:focus-visible, .btnDanger:focus-visible { outline: 2px solid #000; outline-offset: 2px; }
 
-/* Крупнее под палец */
+/* Телефон: кнопки компактные, чтобы не закрывали принт; зона касания — 44 px за счёт невидимого поля вокруг. */
 @media (pointer: coarse) {
-  .btn, .btnAccent, .btnDanger { width: 36px; height: 36px; }
+  .btn, .btnAccent, .btnDanger { width: 28px; height: 28px; border-width: 1px; box-shadow: 0 1px 4px rgb(0 0 0 / .22); }
+  .btn svg, .btnAccent svg, .btnDanger svg { width: 14px; height: 14px; }
+  .btn::after, .btnAccent::after, .btnDanger::after { content: ''; position: absolute; inset: -8px; border-radius: 50%; }
+  .caption { font-size: 10px; padding: 2px 7px; }
 }
 
 /* Область холста: всё, что поверх него (зона, плашки, кнопки слоя), обрезается по её краям. */

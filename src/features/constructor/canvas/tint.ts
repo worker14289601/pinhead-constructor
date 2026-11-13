@@ -75,6 +75,28 @@ async function tint(url: string, hex: string) {
 }
 
 /**
+ * Заранее готовит остальные стороны изделия в текущем цвете — по одной, когда браузер свободен.
+ * Иначе первая смена стороны ждёт загрузку и перекраску мокапа (сотни мс на телефоне), и поворот подвисает.
+ * Возвращает отмену.
+ */
+export function prefetchTints(urls: string[], hex: string): () => void {
+  let alive = true;
+  const queue = urls.filter((u) => !tintCache.has(`${u}|${hex}`));
+  const idle = (cb: () => void) => {
+    const w = window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number };
+    if (w.requestIdleCallback) w.requestIdleCallback(cb, { timeout: 1500 });
+    else window.setTimeout(cb, 120);
+  };
+  const next = () => {
+    const url = queue.shift();
+    if (!alive || !url) return;
+    tint(url, hex).catch(() => {}).finally(() => alive && idle(next));
+  };
+  idle(next);
+  return () => { alive = false; };
+}
+
+/**
  * Окрашенный мокап и маска складок. null — пока грузится или мокапа нет.
  * Пока грузится новый мокап, возвращается прежний; `url` в результате говорит, чей он.
  */
