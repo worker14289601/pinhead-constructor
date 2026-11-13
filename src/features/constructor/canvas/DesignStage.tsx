@@ -11,10 +11,11 @@ import { layerSizeCm } from '../model/bounds';
 import { formatFor } from '../model/pricing';
 import { fontReady } from '../model/fonts';
 import { selectGarment, selectVariant, useConstructor } from '../model/store';
-import { isSleeve, type Side } from '../model/types';
+import { isSleeve, type DesignLayer, type Side } from '../model/types';
 import { alignLayer, snapToCenter, type AlignMode } from './align';
 import { DESIGN_NODE, LayerNode } from './LayerNode';
 import { SelectionControls } from './SelectionControls';
+import { startPinch, type Pt } from './gestures';
 import c from './controls.module.css';
 import { SILHOUETTES, SILHOUETTE_VIEWBOX } from './silhouettes';
 import { isLight, zoneTone, useTintedMockup } from './tint';
@@ -51,6 +52,17 @@ const MAX_ZOOM = 1.3;
 const SLEEVE_FILL = 0.5;
 /** Предел приближения кнопками (вместе с приближением рукава) и шаг одного нажатия. */
 const MAX_TOTAL_ZOOM = 4;
+/**
+ * Фокус на выбранном принте (редактирование слоя на телефоне): ширина зоны печати — FOCUS_FILL ширины холста,
+ * по высоте камера встаёт на принт. Поля: сверху FOCUS_TOP px под кнопки слоя (поворот, дубль, удалить),
+ * снизу FOCUS_BOTTOM. Приближение не больше FOCUS_MAX; вид можно сдвинуть пальцем по фону.
+ */
+const FOCUS_FILL = 0.94;
+const FOCUS_TOP = 48;
+const FOCUS_BOTTOM = 14;
+const FOCUS_MAX = 3;
+/** Длительность наезда/отъезда камеры при входе в фокус и выходе из него, мс. */
+const FOCUS_MS = 520;
 
 /** Порог прилипания к центру зоны, в пикселях экрана. */
 const SNAP_PX = 6;
@@ -59,13 +71,15 @@ const LIME = '#99ff00';
 const INK = '#000000';
 
 /** apiRef — обычный проп, а не ref: next/dynamic не пробрасывает ref в ленивый компонент. */
-export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom }: {
+export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = false }: {
   apiRef: RefObject<DesignStageHandle>;
   /** Масштаб, которым управляет родитель (кнопки вне холста). Без него — внутреннее состояние. */
   zoom?: number;
   onZoom?: Dispatch<SetStateAction<number>>;
   /** Действия приглашения на пустой стороне: загрузить картинку / добавить текст. */
   empty?: { onUpload: () => void; dragging?: boolean };
+  /** Приблизить холст к зоне печати (пока редактируют слой); переход — плавный. */
+  focus?: boolean;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
@@ -73,7 +87,16 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom }: {
   const shadeRef = useRef<Konva.Image>(null);
   const guideRef = useRef<Konva.Line>(null);
   const trRef = useRef<Konva.Transformer>(null);
+  const vpRef = useRef<HTMLDivElement>(null);
+  // Жест двумя пальцами: касания, активность и слой, у которого на время жеста отключено перетаскивание.
+  const touches = useRef(new Map<number, Pt>());
+  const pinch = useRef<{ update: (a: Pt, b: Pt) => void; ids: [number, number]; id: string } | null>(null);
+  const pinchBusy = useRef(false);
+  const pinchCtx = useRef<{ area: { w: number; h: number } | null; layer: DesignLayer | undefined }>({ area: null, layer: undefined });
+  // size — кадр изделия (пропорции 400×460), box — весь холст: на телефоне он шире кадра,
+  // и в приближении изделие заполняет всю ширину, а не обрезается по краям кадра.
   const [size, setSize] = useState({ w: 400, h: 460 });
+  const [box, setBox] = useState({ w: 400, h: 460 });
   const [zoomInner, setZoomInner] = useState(1);
   const zoom = zoomProp ?? zoomInner;
   const setZoom = onZoom ?? setZoomInner;
@@ -93,7 +116,8 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom }: {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const panRef = useRef(pan);
   panRef.current = pan;
-  const panLimits = useRef({ bx: 0, by: 0, minX: 0, minY: 0, k: 1 });
+  const panLimits = useRef({ bx: 0, by: 0, minX: 0, maxX: 0, minY: 0, maxY: 0, k: 1 });
+  const exportView = useRef({ k: 1, x: 0, y: 0, rect: { x: 0, y: 0, width: 400, height: 460 } });
   const baseView = useRef({ x: 0, y: 0 });
 
   const garment = useConstructor(selectGarment);
@@ -223,8 +247,10 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom }: {
     const ro = new ResizeObserver(([e]) => {
       const { width, height } = e.contentRect;
       const ratio = FRAME.h / FRAME.w;
-      const w = Math.max(200, Math.min(width, height / ratio));
+      // Нижний предел небольшой: над экранной клавиатурой холст ужимается сильно.
+      const w = Math.max(120, Math.min(width, height / ratio));
       setSize({ w, h: w * ratio });
+      setBox({ w: Math.max(w, width), h: Math.max(w * ratio, height) });
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -245,7 +271,47 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom }: {
   const area = pa ? { x: pa.x * size.w, y: pa.y * size.h, w: pa.width * size.w, h: pa.height * size.h } : null;
   // Приближение — на время просмотра одной стороны: при смене стороны и модели возвращаем 100%.
   useEffect(() => setZoom(1), [side, garmentId, setZoom]);
-  useEffect(() => setPan({ x: 0, y: 0 }), [side, garmentId, zoom]);
+  // Фокус — на конкретном слое: выбор другого слоя тоже плавно переводит камеру.
+  // Камера едет, только когда палец/кнопка отпущены: схватил принт и сразу тащишь — вид не уезжает из-под пальца.
+  const [pressing, setPressing] = useState(false);
+  useEffect(() => {
+    // После отпускания — на следующей задаче: конец перетаскивания (mouseup/touchend) успевает записать слой.
+    const up = () => { window.setTimeout(() => setPressing(false), 0); };
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+    return () => { window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up); };
+  }, []);
+  const focusLatch = useRef<string | null>(null);
+  if (!focus || !selectedLayerId) focusLatch.current = null;
+  else if (!pressing) focusLatch.current = selectedLayerId;
+  const focusKey = focusLatch.current;
+  const focusOn = focusKey !== null;
+  useEffect(() => setPan({ x: 0, y: 0 }), [side, garmentId, zoom, focusKey]);
+
+  // Плавный переход камеры при смене фокуса: от того, что было на экране, к новому виду.
+  // Точку старта берём до первого кадра с новым фокусом; новый вид пересчитывается каждый кадр —
+  // холст в это время может менять размер.
+  const fromView = useRef<{ k: number; x: number; y: number; t0: number } | null>(null);
+  const shownView = useRef({ k: 1, x: 0, y: 0 });
+  const prevFocus = useRef(focusKey);
+  if (prevFocus.current !== focusKey) {
+    prevFocus.current = focusKey;
+    fromView.current = prefersReducedMotion() ? null : { ...shownView.current, t0: performance.now() };
+  }
+  const [, setFrame] = useState(0);
+  useEffect(() => {
+    if (!fromView.current) return;
+    let raf = 0;
+    const step = () => {
+      const f = fromView.current;
+      if (!f) return;
+      if (performance.now() - f.t0 >= FOCUS_MS) fromView.current = null;
+      setFrame((n) => n + 1);
+      if (fromView.current) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [focusKey]);
 
   const sideLayers = layers.filter((l) => l.side === side);
 
@@ -261,6 +327,8 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom }: {
     }
   }
 
+  pinchCtx.current = { area: area ? { w: area.w, h: area.h } : null, layer: selectedLayer };
+
   // Размер зоны печати в см для плашки: до 10 см — с десятыми, дальше — целые.
   const zoneFmt = (n: number) => (n < 10 ? fmt(n) : String(Math.round(n)));
   const zoneText = pa && area ? `${zoneFmt(pa.widthCm)} × ${zoneFmt(pa.widthCm * (area.h / area.w))} см` : undefined;
@@ -270,24 +338,90 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom }: {
 
   // Рукав — маленькая зона: приближаем холст к ней, не выходя за края кадра.
   // Кнопки масштаба умножают это приближение; центр — середина зоны печати, края кадра не покидаем.
-  const view = { k: 1, x: 0, y: 0 };
-  if (area && (isSleeve(side) || zoom > 1)) {
+  // Середина выбранного принта по высоте (доля высоты зоны) — запоминаем при выборе, чтобы камера
+  // не гонялась за слоем, пока его тащат.
+  // Там же — габарит принта в долях зоны: крупный принт должен поместиться в холст целиком (с кнопками).
+  const anchorRef = useRef<{ key: string | null; v: number; w: number; h: number }>({ key: null, v: 0.5, w: 0, h: 0 });
+  const focusAnchor = (key: string | null) => {
+    if (anchorRef.current.key !== key) {
+      let v = 0.5, w = 0, h = 0;
+      if (selectedLayer && area) {
+        if (selectedLayer.kind === 'image') {
+          w = selectedLayer.width;
+          h = (selectedLayer.width * area.w * selectedLayer.naturalHeight) / selectedLayer.naturalWidth / area.h;
+          v = selectedLayer.y + h / 2;
+        } else {
+          // У текста точка слоя — его центр; высота — по строкам (дуга и обводка не в счёт, это оценка).
+          const lines = selectedLayer.text.split('\n').length;
+          h = (selectedLayer.fontSize * area.w * (selectedLayer.lineHeight ?? 1.2) * lines) / area.h;
+          v = selectedLayer.y;
+        }
+      }
+      anchorRef.current = { key, v: Math.min(1, Math.max(0, v)), w, h };
+    }
+    return anchorRef.current;
+  };
+  // Вид холста в координатах сцены (box): масштаб k и положение начала кадра. Кадр по центру холста;
+  // в приближении — как можно шире, но без пустоты сбоку там, где изделие могло бы её закрыть.
+  const ox = (box.w - size.w) / 2;
+  const oy = (box.h - size.h) / 2;
+  const clampR = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
+  /** Где может стоять край кадра длиной full на холсте длиной vis: закрывает холст целиком или целиком на нём. */
+  const span = (vis: number, full: number): [number, number] => [Math.min(0, vis - full), Math.max(0, vis - full)];
+  const calcView = (withFocus: boolean) => {
+    const v = { k: 1, x: ox, y: oy, bx: ox, by: oy, minX: ox, maxX: ox, minY: oy, maxY: oy };
+    if (!area || !(isSleeve(side) || zoom > 1 || withFocus)) return v;
     const fit = Math.min(MAX_ZOOM, (SLEEVE_FILL * size.h) / area.h, (SLEEVE_FILL * size.w) / area.w);
-    const base = isSleeve(side) ? Math.max(1, fit) : 1;
+    const fa = withFocus ? focusAnchor(focusKey) : null;
+    // Ширина зоны — во весь холст, но принт целиком (по высоте и ширине) остаётся в кадре между полями.
+    const focusFit = Math.min(
+      FOCUS_MAX,
+      (FOCUS_FILL * box.w) / area.w,
+      fa && fa.h > 0 ? (box.h - FOCUS_TOP - FOCUS_BOTTOM - 40) / (fa.h * area.h) : Infinity,
+      fa && fa.w > 0 ? (FOCUS_FILL * box.w) / (fa.w * area.w) : Infinity,
+    );
+    const base = Math.max(1, isSleeve(side) ? fit : 1, withFocus ? focusFit : 1);
     const k = Math.min(MAX_TOTAL_ZOOM, base * zoom);
-    const clamp = (v: number, min: number) => Math.min(0, Math.max(min, v));
-    view.k = k;
-    const bx = clamp(size.w / 2 - (area.x + area.w / 2) * k, size.w - size.w * k);
-    const by = clamp(size.h / 2 - (area.y + area.h / 2) * k, size.h - size.h * k);
-    view.k = k;
-    view.x = clamp(bx + pan.x, size.w - size.w * k);
-    view.y = clamp(by + pan.y, size.h - size.h * k);
-    panLimits.current = { bx, by, minX: size.w - size.w * k, minY: size.h - size.h * k, k };
-    baseView.current = { x: bx, y: by };
-  } else {
-    panLimits.current = { bx: 0, by: 0, minX: 0, minY: 0, k: 1 };
-    baseView.current = { x: 0, y: 0 };
+    const [minX, maxX] = span(box.w, size.w * k);
+    const bx = clampR(box.w / 2 - (area.x + area.w / 2) * k, minX, maxX);
+    let [minY, maxY] = span(box.h, size.h * k);
+    let by = clampR(box.h / 2 - (area.y + area.h / 2) * k, minY, maxY);
+    if (withFocus) {
+      // Камера по высоте — на принт (середина между полями), но зона печати не уходит от полей внутрь:
+      // сверху hi — верх зоны у верхнего поля, снизу lo — низ зоны у нижнего. Пальцем по фону — в этих же пределах.
+      const anchor = fa?.v ?? 0.5;
+      const mid = FOCUS_TOP + (box.h - FOCUS_TOP - FOCUS_BOTTOM) / 2;
+      const hi = FOCUS_TOP - area.y * k;
+      const lo = box.h - FOCUS_BOTTOM - (area.y + area.h) * k;
+      by = lo > hi ? (lo + hi) / 2 : clampR(mid - (area.y + anchor * area.h) * k, lo, hi);
+      minY = Math.min(by, lo);
+      maxY = Math.max(by, hi);
+    }
+    return { k, x: clampR(bx + pan.x, minX, maxX), y: clampR(by + pan.y, minY, maxY), bx, by, minX, maxX, minY, maxY };
+  };
+  const cv = calcView(focusOn);
+  const view = { k: cv.k, x: cv.x, y: cv.y };
+  panLimits.current = { bx: cv.bx, by: cv.by, minX: cv.minX, maxX: cv.maxX, minY: cv.minY, maxY: cv.maxY, k: cv.k };
+  baseView.current = { x: cv.bx, y: cv.by };
+  // Снимки для заявки — как раньше, по кадру изделия без фокуса: тот же масштаб (рукав приближен),
+  // кадр заполнен изделием; вырезаем ровно прямоугольник кадра.
+  {
+    const r = calcView(false);
+    const [fxa] = span(size.w, size.w * r.k);
+    const [fya] = span(size.h, size.h * r.k);
+    const fx = area ? clampR(size.w / 2 - (area.x + area.w / 2) * r.k, fxa, 0) : 0;
+    const fy = area ? clampR(size.h / 2 - (area.y + area.h / 2) * r.k, fya, 0) : 0;
+    exportView.current = { k: r.k, x: ox + fx, y: oy + fy, rect: { x: ox, y: oy, width: size.w, height: size.h } };
   }
+  const from = fromView.current;
+  const focusT = from ? Math.min(1, (performance.now() - from.t0) / FOCUS_MS) : 1;
+  if (from && focusT < 1) {
+    const e = 1 - (1 - focusT) ** 3;
+    view.k = from.k + (view.k - from.k) * e;
+    view.x = from.x + (view.x - from.x) * e;
+    view.y = from.y + (view.y - from.y) * e;
+  }
+  shownView.current = { ...view };
   const pannable = view.k > 1;
 
   /** Сдвигает вид на (dx, dy) px экрана, не выпуская изделие за края кадра. true — вид действительно сдвинулся. */
@@ -295,8 +429,8 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom }: {
     const L = panLimits.current;
     if (L.k <= 1) return false;
     const p = panRef.current;
-    const nx = Math.min(0, Math.max(L.minX, L.bx + p.x + dx)) - L.bx;
-    const ny = Math.min(0, Math.max(L.minY, L.by + p.y + dy)) - L.by;
+    const nx = Math.min(L.maxX, Math.max(L.minX, L.bx + p.x + dx)) - L.bx;
+    const ny = Math.min(L.maxY, Math.max(L.minY, L.by + p.y + dy)) - L.by;
     if (nx === p.x && ny === p.y) return false;
     panRef.current = { x: nx, y: ny };
     setPan(panRef.current);
@@ -306,18 +440,26 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom }: {
   panByRef.current = panBy;
 
   // Перетаскивание фона и изделия двигает вид; слои (и рамка выделения) сохраняют своё перетаскивание.
+  // Касание фона, которым сдвинули вид, — не «снять выделение»: иначе в приближении нельзя двигать вид.
+  const panned = useRef(false);
   const onWrapPointerDown = (e: React.PointerEvent) => {
+    panned.current = false;
     const stage = stageRef.current;
     if (!stage || panLimits.current.k <= 1 || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    if (pinchBusy.current || touches.current.size > 1) return;
     if (!stage.content.contains(e.target as Node)) return;
     const box = stage.container().getBoundingClientRect();
     const hit = stage.getIntersection({ x: e.clientX - box.left, y: e.clientY - box.top });
     if (hit && hit.name() !== 'bg') return;
     let lx = e.clientX;
     let ly = e.clientY;
+    const sx = e.clientX;
+    const sy = e.clientY;
     const id = e.pointerId;
     const move = (ev: PointerEvent) => {
       if (ev.pointerId !== id) return;
+      if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 6) panned.current = true;
+      if (pinchBusy.current || touches.current.size > 1) { lx = ev.clientX; ly = ev.clientY; return; }
       panByRef.current(ev.clientX - lx, ev.clientY - ly);
       lx = ev.clientX;
       ly = ev.clientY;
@@ -344,6 +486,77 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom }: {
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  // Два пальца при выбранном слое: масштаб и поворот слоя (в любом месте холста). Без выбранного слоя — ничего, как раньше.
+  // Пишем в узел, а в стор — одним шагом истории, когда пальцев стало меньше двух (как у ручек).
+  useEffect(() => {
+    const el = vpRef.current;
+    if (!el) return;
+    const local = (e: PointerEvent): Pt => {
+      const r = el.getBoundingClientRect();
+      return { x: e.clientX - r.left, y: e.clientY - r.top };
+    };
+    const nodeOf = (id: string) => stageRef.current?.findOne(`#${id}`) ?? null;
+    const finish = () => {
+      const g = pinch.current;
+      pinch.current = null;
+      const { area: a, layer } = pinchCtx.current;
+      const node = g ? nodeOf(g.id) : null;
+      if (!g || !node || !a || !layer || layer.id !== g.id) return;
+      const sx = node.scaleX();
+      node.scale({ x: 1, y: 1 });
+      const base = { x: node.x() / a.w, y: node.y() / a.h, rotation: node.rotation() };
+      useConstructor.getState().updateLayer(
+        layer.id,
+        layer.kind === 'image' ? { ...base, width: (node.width() * sx) / a.w } : { ...base, fontSize: layer.fontSize * sx },
+      );
+    };
+    const release = () => {
+      // Перетаскивание возвращаем, когда подняты все пальцы, — оставшийся палец не должен утащить слой.
+      if (touches.current.size > 0) return;
+      pinchBusy.current = false;
+      for (const l of stageRef.current?.find(`.${DESIGN_NODE}`) ?? []) l.draggable(true);
+    };
+    const down = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch') return;
+      touches.current.set(e.pointerId, local(e));
+      const { layer } = pinchCtx.current;
+      if (touches.current.size !== 2 || pinch.current || !layer) return;
+      const node = nodeOf(layer.id);
+      if (!node || !node.isVisible()) return;
+      const ids = [...touches.current.keys()] as [number, number];
+      pinchBusy.current = true;
+      // Первый палец мог начать перетаскивание слоя — гасим его (draggable(false) останавливает drag).
+      for (const l of stageRef.current?.find(`.${DESIGN_NODE}`) ?? []) l.draggable(false);
+      guideOff();
+      pinch.current = { ids, id: layer.id, update: startPinch(node, touches.current.get(ids[0])!, touches.current.get(ids[1])!, MIN_NODE_PX) };
+    };
+    const guideOff = () => setGuides((p) => (p.v || p.h ? { v: false, h: false } : p));
+    const move = (e: PointerEvent) => {
+      if (!touches.current.has(e.pointerId)) return;
+      touches.current.set(e.pointerId, local(e));
+      const g = pinch.current;
+      if (!g || !g.ids.includes(e.pointerId)) return;
+      const a = touches.current.get(g.ids[0]);
+      const b = touches.current.get(g.ids[1]);
+      if (a && b) g.update(a, b);
+    };
+    const up = (e: PointerEvent) => {
+      if (!touches.current.delete(e.pointerId)) return;
+      if (pinch.current?.ids.includes(e.pointerId)) finish();
+      release();
+    };
+    el.addEventListener('pointerdown', down, true);
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+    return () => {
+      el.removeEventListener('pointerdown', down, true);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+    };
   }, []);
 
   /** Прилипание к центру зоны при перетаскивании + направляющие. */
@@ -394,16 +607,18 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom }: {
   const unpanned = <T,>(fn: () => T): T => {
     const stage = stageRef.current;
     if (!stage) return fn();
-    const cur = { x: stage.x(), y: stage.y() };
-    stage.position(baseView.current);
-    try { return fn(); } finally { stage.position(cur); }
+    const cur = { x: stage.x(), y: stage.y(), k: stage.scaleX() };
+    const ev = exportView.current;
+    stage.scale({ x: ev.k, y: ev.k });
+    stage.position({ x: ev.x, y: ev.y });
+    try { return fn(); } finally { stage.scale({ x: cur.k, y: cur.k }); stage.position(cur); }
   };
 
   useImperativeHandle(apiRef, () => ({
     exportPreview: () => {
       settleAppear();
       return stageRef.current
-        ? withHidden([guideRef.current, trRef.current], () => unpanned(() => stageRef.current!.toDataURL({ pixelRatio: 2 })))
+        ? withHidden([guideRef.current, trRef.current], () => unpanned(() => stageRef.current!.toDataURL({ ...exportView.current.rect, pixelRatio: 2 })))
         : null;
     },
     exportPrint: () => {
@@ -412,8 +627,8 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom }: {
       if (!g || !pa || !area) return null;
       const targetPx = (pa.widthCm / 2.54) * DPI;
       // toDataURL берёт область в координатах экрана — с учётом приближения холста.
-      const w = area.w * view.k;
-      const h = area.h * view.k;
+      const w = area.w * exportView.current.k;
+      const h = area.h * exportView.current.k;
       const full = targetPx / w;
       // Файл для печати — без складок ткани и только по самому рисунку: пустая часть зоны в файл не идёт,
       // поэтому предел площади canvas почти всегда оставляет полные 300 dpi.
@@ -468,20 +683,30 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom }: {
 
   const silScale = Math.min(size.w / SILHOUETTE_VIEWBOX.w, size.h / SILHOUETTE_VIEWBOX.h);
   const deselect = (e: Konva.KonvaEventObject<Event>) => {
+    if (panned.current) return;
     if (e.target === e.target.getStage() || e.target.name() === 'bg') selectLayer(null);
+  };
+  // На сенсорном экране снимаем выделение не по касанию, а по отпусканию одним пальцем:
+  // иначе первый палец жеста двумя пальцами по фону сбросил бы выбранный слой.
+  const deselectTouch = (e: Konva.KonvaEventObject<Event>) => {
+    const te = e.evt as TouchEvent;
+    if (pinchBusy.current || (te.changedTouches?.length ?? 0) !== 1 || te.touches.length > 0) return;
+    deselect(e);
   };
 
   return (
     <div ref={wrapRef} style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center' }}>
       <div
+        ref={vpRef}
         className={c.viewport}
-        style={{ width: size.w, height: size.h, touchAction: pannable ? 'none' : undefined }}
+        style={{ width: box.w, height: box.h, touchAction: 'none' }}
         onPointerDown={onWrapPointerDown}
+        onPointerDownCapture={() => setPressing(true)}
       >
       <Stage
-        ref={stageRef} width={size.w} height={size.h}
+        ref={stageRef} width={box.w} height={box.h}
         scaleX={view.k} scaleY={view.k} x={view.x} y={view.y}
-        onMouseDown={deselect} onTouchStart={deselect}
+        onMouseUp={deselect} onTouchEnd={deselectTouch}
       >
         <Layer>
           {shape ? (
@@ -527,7 +752,7 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom }: {
                   layer={l}
                   area={{ w: area.w, h: area.h }}
                   onSelect={() => selectLayer(l.id)}
-                  onChange={(p) => updateLayer(l.id, p)}
+                  onChange={(p) => { if (!pinchBusy.current) updateLayer(l.id, p); }}
                   onDrag={onDrag}
                 />
               ))}

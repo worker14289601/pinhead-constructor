@@ -90,6 +90,46 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
     if (st.selectedLayerId) setTab((t) => (t === 'garment' ? 'design' : t));
   }, [st.selectedLayerId]);
 
+  // Телефон: каждая вкладка прокручивается сама — при смене вкладки или слоя показываем её с начала.
+  const appRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    appRef.current?.querySelectorAll<HTMLElement>('[data-section]').forEach((el) => { el.scrollTop = 0; });
+  }, [tab, st.selectedLayerId]);
+
+  // Телефонная раскладка: при редактировании слоя холст приближается к зоне печати.
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 900px)');
+    const on = () => setNarrow(mq.matches);
+    on();
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+
+  // Экранная клавиатура: высота видимой области — в --vvh, пока клавиатура открыта — data-kb.
+  // Раскладка ужимается над клавиатурой, чтобы изделие с текстом оставалось на виду во время набора.
+  const [kb, setKb] = useState(false);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onResize = () => {
+      const open = window.innerHeight - vv.height > 120 && window.matchMedia('(max-width: 900px)').matches;
+      appRef.current?.style.setProperty('--vvh', `${Math.round(vv.height)}px`);
+      setKb(open);
+      if (!open) return;
+      // iOS сдвигает страницу к полю ввода; у нас прокручивается панель, а страница должна стоять на месте.
+      window.scrollTo(0, 0);
+      // После перестройки раскладки поле ввода — в видимой части своей панели.
+      requestAnimationFrame(() => {
+        (document.activeElement as HTMLElement | null)?.scrollIntoView?.({ block: 'nearest' });
+        window.scrollTo(0, 0);
+      });
+    };
+    onResize();
+    vv.addEventListener('resize', onResize);
+    return () => vv.removeEventListener('resize', onResize);
+  }, []);
+
   // Cmd/Ctrl+Z — отмена, Cmd/Ctrl+Shift+Z и Ctrl+Y — повтор, Delete — удалить выбранный слой.
   // Когда фокус в поле ввода, клавиши остаются полю (там своя отмена набора).
   // Пока открыта форма заявки, клавиши холст не трогают.
@@ -220,7 +260,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
   };
 
   return (
-    <div className={s.app} data-tab={tab}>
+    <div ref={appRef} className={s.app} data-tab={tab} data-editing={selected ? '' : undefined} data-kb={kb ? '' : undefined}>
       {/* Изделие */}
       <section className={`${s.panel} ${s.left}`} data-section="garment">
         <h3 className={s.h}>Изделие</h3>
@@ -258,6 +298,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
             empty={{ onUpload: () => fileRef.current?.click(), dragging: dragOver }}
             zoom={zoom}
             onZoom={setZoom}
+            focus={narrow && !!st.selectedLayerId}
           />
           {dragOver && <div className={s.dropHint}>Отпустите файл, чтобы добавить</div>}
         </div>

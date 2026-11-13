@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useReducer, useRef, useState, type PointerE
 import type Konva from 'konva';
 import type { DesignLayer } from '../model/types';
 import c from './controls.module.css';
+import { centerOf, keepCenter, minScale, snapRotation, type Pt } from './gestures';
 
 /**
  * Кнопки выбранного слоя поверх холста: поворот (сверху, на «ножке»), размер (правый нижний угол),
@@ -17,8 +18,6 @@ const BTN = 32;
 const STEM = 48;
 /** Угловые кнопки вынесены наружу на столько по каждой оси — не закрывают принт и не налезают друг на друга. */
 const OUT = BTN / 2 + 2;
-/** Прилипание поворота к 0/90/180/270°, градусы. */
-const SNAP_DEG = 5;
 
 interface Props {
   stage: Konva.Stage | null;
@@ -38,7 +37,6 @@ interface Props {
   onDuplicate: () => void;
 }
 
-interface Pt { x: number; y: number }
 interface Geo { top: Pt; rotate: Pt; resize: Pt; remove: Pt; duplicate: Pt; label: Pt }
 
 type Gesture =
@@ -46,21 +44,6 @@ type Gesture =
   | { mode: 'resize'; center: Pt; dist0: number };
 
 const deg = (rad: number) => (rad * 180) / Math.PI;
-
-/** Точка середины узла в координатах холста. */
-function centerOf(node: Konva.Node): Pt {
-  return node.getAbsoluteTransform().point({ x: node.width() / 2, y: node.height() / 2 });
-}
-
-/** Сдвигает узел так, чтобы его середина вернулась в точку `center` (после поворота или масштаба). */
-function keepCenter(node: Konva.Node, center: Pt) {
-  const parent = node.getParent();
-  if (!parent) return;
-  const inv = parent.getAbsoluteTransform().copy().invert();
-  const now = inv.point(centerOf(node));
-  const want = inv.point(center);
-  node.position({ x: node.x() + want.x - now.x, y: node.y() + want.y - now.y });
-}
 
 function geometry(node: Konva.Node, size: { w: number; h: number }): Geo {
   const t = node.getAbsoluteTransform();
@@ -114,10 +97,10 @@ export function SelectionControls({ stage, layer, area, size, minPx, accent, cap
     }
   });
 
-  // Перетаскивание самого принта двигает и кнопки.
+  // Перетаскивание самого принта и жест двумя пальцами двигают и кнопки.
   useEffect(() => {
     if (!node) return;
-    node.on('dragmove.controls dragend.controls', bump);
+    node.on('dragmove.controls dragend.controls pinch.controls', bump);
     return () => { node.off('.controls'); };
   }, [node]);
 
@@ -145,15 +128,12 @@ export function SelectionControls({ stage, layer, area, size, minPx, accent, cap
     const p = pointer(e);
     if (g.mode === 'rotate') {
       let r = g.rotation0 + deg(Math.atan2(p.y - g.center.y, p.x - g.center.x)) - g.startAngle;
-      r = ((r % 360) + 540) % 360 - 180; // (-180, 180]
-      for (const s of [-180, -90, 0, 90, 180]) if (Math.abs(r - s) <= SNAP_DEG) r = s === -180 ? 180 : s;
-      node.rotation(r);
+      node.rotation(snapRotation(r));
     } else {
       const k = Math.hypot(p.x - g.center.x, p.y - g.center.y) / g.dist0;
       // Не меньше minPx на экране по обеим сторонам.
-      const view = node.getAbsoluteScale().x / (node.scaleX() || 1);
-      const minK = minPx / Math.max(1e-6, Math.min(node.width(), node.height()) * view);
-      node.scale({ x: Math.max(k, minK), y: Math.max(k, minK) });
+      const s = Math.max(k, minScale(node, minPx));
+      node.scale({ x: s, y: s });
     }
     keepCenter(node, g.center);
     node.getLayer()?.batchDraw();

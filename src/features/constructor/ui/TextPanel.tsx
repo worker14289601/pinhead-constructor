@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FONT_GROUPS, FONTS, fontDef, TEXT_COLORS } from '../config/fonts';
 import { ensureFont, onFontLoaded } from '../model/fonts';
 import { useConstructor } from '../model/store';
@@ -10,6 +10,9 @@ import d from './design.module.css';
 const ALIGNS: Array<[TextLayer['align'], string, IconName]> = [
   ['left', 'По левому краю', 'alignLeft'], ['center', 'По центру', 'alignCenter'], ['right', 'По правому краю', 'alignRight'],
 ];
+
+/** Текст по умолчанию у нового слоя (как в store.addText): пока он не тронут, поле сразу в фокусе. */
+const DEFAULT_TEXT = 'Твой текст';
 
 const fontStyle = (family: string) => ({ fontFamily: `"${family}", Arial, sans-serif` });
 
@@ -34,6 +37,27 @@ export function TextPanel({ layer }: { layer: TextLayer }) {
   const [, tick] = useState(0);
   const [fontsOpen, setFontsOpen] = useState(false);
   const def = fontDef(layer.fontFamily);
+  const areaRef = useRef<HTMLTextAreaElement>(null);
+  const stripRef = useRef<HTMLDivElement>(null);
+
+  // Только что созданный текст: фокус и выделение, чтобы сразу печатать своё.
+  // Панель пересоздаётся на каждый слой (key), поэтому достаточно монтирования; изменённый текст фокус не получает.
+  useEffect(() => {
+    if (layer.text !== DEFAULT_TEXT) return;
+    const el = areaRef.current;
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    el.select();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Лента шрифтов на телефоне: выбранный шрифт показываем в поле зрения.
+  useEffect(() => {
+    const strip = stripRef.current;
+    const active = strip?.querySelector<HTMLElement>('[aria-pressed="true"]');
+    if (strip && active) strip.scrollLeft = active.offsetLeft - (strip.clientWidth - active.offsetWidth) / 2;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const set = (patch: Partial<TextLayer>, mode: 'commit' | 'merge' = 'commit') => updateLayer(layer.id, patch, mode);
 
   // Превью строк — текст слоя нужным шрифтом, поэтому грузим все шрифты списка (только нужные буквы).
@@ -56,15 +80,28 @@ export function TextPanel({ layer }: { layer: TextLayer }) {
       <div className={`${d.block} ${d.blockFirst}`}>
         <div className={d.sub}>Текст</div>
         <textarea
-          className={d.textarea} rows={2} value={layer.text} aria-label="Текст" placeholder="Введите текст"
+          ref={areaRef} className={d.textarea} rows={2} value={layer.text} aria-label="Текст" placeholder="Введите текст"
           onChange={(e) => set({ text: e.target.value }, 'merge')}
         />
       </div>
 
       <div className={d.block}>
         <div className={d.sub}>Шрифт</div>
+        {/* Телефон: горизонтальная лента карточек */}
+        <div className={d.fontStrip} ref={stripRef} role="group" aria-label="Шрифт">
+          {FONTS.map((f) => (
+            <button
+              key={f.family} type="button" aria-pressed={f.family === layer.fontFamily}
+              className={f.family === layer.fontFamily ? d.fontCardActive : d.fontCard}
+              onClick={() => pickFont(f.family)} title={f.family}
+            >
+              <span className={d.fontCardPreview} style={fontStyle(f.family)}>{sample}</span>
+              <span className={d.fontCardName}>{f.family}</span>
+            </button>
+          ))}
+        </div>
         <button
-          type="button" className={fontsOpen ? `${d.fontSel} ${d.fontSelOpen}` : d.fontSel}
+          type="button" className={`${d.desktopFont} ${fontsOpen ? `${d.fontSel} ${d.fontSelOpen}` : d.fontSel}`}
           aria-expanded={fontsOpen} onClick={() => setFontsOpen((o) => !o)} title="Выбрать шрифт"
         >
           <span className={d.fontPreview} style={fontStyle(layer.fontFamily)}>{sample}</span>
@@ -72,7 +109,7 @@ export function TextPanel({ layer }: { layer: TextLayer }) {
           <Icon name="chevronDown" size={18} />
         </button>
         {fontsOpen && (
-          <div className={d.fontList}>
+          <div className={`${d.desktopFont} ${d.fontList}`}>
             {FONT_GROUPS.map(([group, title]) => (
               <div key={group} style={{ display: 'contents' }}>
                 <div className={d.fontGroup}>{title}</div>

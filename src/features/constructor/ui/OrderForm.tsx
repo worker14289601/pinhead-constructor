@@ -120,6 +120,26 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
   const methodName = METHOD_INFO[method].title.split(/\s+[—–-]\s+/)[0];
   const field = (k: keyof OrderContacts) => (e: { target: { value: string } }) => setC({ ...c, [k]: e.target.value });
 
+  // «Далее» на мобильной клавиатуре: Enter переводит на следующее поле, а не отправляет форму.
+  const nextOnEnter = (e: React.KeyboardEvent<HTMLFormElement>) => {
+    const t = e.target as HTMLElement;
+    if (e.key !== 'Enter' || t.tagName !== 'INPUT' || (t as HTMLInputElement).type === 'checkbox') return;
+    e.preventDefault();
+    const all = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('input:not([type=checkbox]), textarea'))
+      .filter((el) => !el.closest('[aria-hidden="true"]'));
+    all[all.indexOf(t) + 1]?.focus();
+  };
+  // Ошибка валидации: первое невалидное поле — в центр экрана и в фокус (браузер сам прокрутил бы под прилипшие панели).
+  const invalidSeen = useRef(false);
+  const focusInvalid = (e: React.FormEvent<HTMLFormElement>) => {
+    if (invalidSeen.current) return;
+    invalidSeen.current = true;
+    setTimeout(() => { invalidSeen.current = false; }, 0);
+    const t = e.target as HTMLElement;
+    t.focus({ preventScroll: true });
+    t.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  };
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (capturing) return; // холст ещё перебирает стороны для превью
@@ -209,11 +229,13 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
     <div className={`${s.modalBg} ${f.bg}`} data-leaving={leaving || undefined} onClick={close}>
       <form
         className={`${s.modal} ${f.modal} ${state === 'done' ? f.modalDone : ''}`} onClick={(e) => e.stopPropagation()} onSubmit={submit}
-        role="dialog" aria-modal="true" aria-labelledby="order-title"
+        role="dialog" aria-modal="true" aria-labelledby="order-title" onKeyDown={nextOnEnter} onInvalidCapture={focusInvalid}
       >
         <button type="button" className={f.close} onClick={close} disabled={state === 'sending'} aria-label="Закрыть" title="Закрыть (Esc)">
           <Icon name="close" size={20} />
         </button>
+
+        {state !== 'done' && <div className={f.sheetHead} aria-hidden>Оформление заявки</div>}
 
         {state === 'done' && done ? (
           <div className={f.done}>
@@ -294,16 +316,16 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
               <fieldset className={f.group}>
                 <legend className={f.legend}>Контакты</legend>
                 <Field label="Имя" required wide>
-                  <input className={s.input} required maxLength={100} autoComplete="name" placeholder="Как к вам обращаться"
+                  <input className={s.input} required maxLength={100} autoComplete="name" enterKeyHint="next" placeholder="Как к вам обращаться"
                     value={c.name} onChange={field('name')} />
                 </Field>
                 <Field label="Телефон" required>
-                  <input className={s.input} required type="tel" maxLength={30} autoComplete="tel" placeholder="+7 900 000-00-00"
+                  <input className={s.input} required type="tel" inputMode="tel" enterKeyHint="next" maxLength={30} autoComplete="tel" placeholder="+7 900 000-00-00"
                     pattern=".*\d.*\d.*\d.*\d.*\d.*" title="Номер телефона с кодом города или оператора"
                     value={c.phone} onChange={field('phone')} />
                 </Field>
                 <Field label="E-mail" required>
-                  <input className={s.input} required type="email" maxLength={100} autoComplete="email" placeholder="name@mail.ru"
+                  <input className={s.input} required type="email" inputMode="email" enterKeyHint="next" maxLength={100} autoComplete="email" placeholder="name@mail.ru"
                     value={c.email} onChange={field('email')} />
                 </Field>
               </fieldset>
@@ -325,11 +347,11 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
                   </div>
                   <div className={f.ship} data-on={ship || undefined} aria-hidden={!ship}>
                     <Field label="Город" required>
-                      <input className={s.input} required={ship} maxLength={100} autoComplete="address-level2" placeholder="Москва"
+                      <input className={s.input} required={ship} maxLength={100} autoComplete="address-level2" enterKeyHint="next" placeholder="Москва"
                         value={c.city} onChange={field('city')} />
                     </Field>
                     <Field label="Адрес">
-                      <input className={s.input} maxLength={200} autoComplete="street-address" placeholder="Улица, дом, офис"
+                      <input className={s.input} maxLength={200} autoComplete="street-address" enterKeyHint="next" placeholder="Улица, дом, офис"
                         value={c.address ?? ''} onChange={field('address')} />
                     </Field>
                     <p className={`${f.wide} ${f.hint}`}>Стоимость доставки менеджер посчитает отдельно.</p>

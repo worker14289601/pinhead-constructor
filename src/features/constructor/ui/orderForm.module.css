@@ -132,15 +132,31 @@
 .doneActions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
 @keyframes doneIn { from { opacity: 0; scale: .6; } }
 
-/* ── Телефон: окно на весь экран, сводка сверху компактно, кнопка отправки прилипает снизу ── */
-@media (max-width: 720px) {
-  .bg { padding: 0; }
-  .bg:has(.modalDone) { padding: 16px; }
-  .modal { width: 100%; max-height: 100dvh; height: 100dvh; border: 0; border-radius: 0; }
-  .modalDone { height: auto; max-height: calc(100dvh - 32px); border: 1px solid var(--ink); border-radius: var(--r-card); }
-  .grid { grid-template-columns: 1fr; }
-  .summary { border-right: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 18px 16px; gap: 12px; }
-  .summary .kicker { padding-right: 48px; }
+/* ── Телефон: лист на весь экран (100dvh), шапка и кнопка отправки прилипают ── */
+.sheetHead { display: none; }
+@media (max-width: 900px) {
+  .bg { padding: 0; align-items: end; }
+  .bg .modal, .bg .modalDone {
+    width: 100%; max-width: none; height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0;
+    overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  }
+  .bg:not([data-leaving]) .modal { animation: sheetUp .5s var(--ease-out) backwards; }
+  @keyframes sheetUp { from { translate: 0 40px; opacity: 0; } }
+  /* Шапка: заголовок слева, крестик справа; обе прилипают к верху листа */
+  .sheetHead {
+    display: flex; align-items: center; position: sticky; top: 0; z-index: 3; flex: none; box-sizing: border-box;
+    min-height: calc(56px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 64px 0 16px;
+    background: #fff; border-bottom: 1px solid var(--ink);
+    font-family: var(--font-head); font-size: 18px; font-weight: 700; text-transform: uppercase;
+  }
+  .close {
+    /* поверх шапки: она идёт следом в разметке и тоже прилипает */
+    position: sticky; z-index: 4; top: calc(8px + env(safe-area-inset-top)); right: auto; align-self: flex-end; flex: none;
+    width: 44px; height: 44px; margin: calc(8px + env(safe-area-inset-top)) 8px -52px 0;
+  }
+  .fields h3 { display: none; } /* заголовок есть в шапке; aria-labelledby читает и скрытый */
+  .grid { grid-template-columns: 1fr; flex: 1 0 auto; }
+  .summary { border-right: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 16px; gap: 12px; }
   .product { flex-direction: row; align-items: center; gap: 12px; }
   .gallery { width: 72px; flex: none; }
   .preview { border-radius: 10px; }
@@ -149,18 +165,29 @@
   .zoom { padding: 12px; }
   .zoomFig { padding: 12px 8px; }
   .zoomFig img { width: calc(100vw - 40px); }
-  .arrowBig { width: 40px; height: 40px; }
+  .arrowBig { width: 44px; height: 44px; }
   .zoomFig .arrowL { left: 6px; }
   .zoomFig .arrowR { right: 6px; }
+  .zoomClose { width: 44px; height: 44px; margin: 0; position: absolute; top: 8px; right: 8px; }
   .summary .steps { display: none; }
-  .fields { padding: 18px 16px 0; }
-  .fields h3 { padding-right: 0; }
+  .fields { padding: 16px 16px 0; gap: 16px; }
+  .fields { flex: 1; }
   .group { grid-template-columns: 1fr; }
+  .ship { grid-template-columns: 1fr; }
+  /* Поля не уезжают под прилипшие шапку и кнопку при прокрутке к ошибке */
+  .field input, .textarea { scroll-margin: 80px 0 150px; min-height: 48px; }
+  .textarea { min-height: 88px; }
   .submit {
-    position: sticky; bottom: 0; margin: 0 -16px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
-    background: #fff; border-top: 1px solid var(--line);
+    position: sticky; bottom: 0; z-index: 3; margin: auto -16px 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    background: #fff; border-top: 1px solid var(--ink);
   }
-  .doneActions { grid-template-columns: 1fr; }
+  .send { min-height: 52px; }
+
+  /* Экран успеха: тоже на весь лист, кнопки внизу */
+  .done { flex: 1; align-items: stretch; padding: 32px 16px calc(16px + env(safe-area-inset-bottom)); }
+  .done h3 { padding-right: 48px; }
+  .done .doneIcon { align-self: flex-start; }
+  .doneActions { grid-template-columns: 1fr; margin-top: auto; padding-top: 16px; }
 }
 
 /* Получение: самовывоз или доставка */

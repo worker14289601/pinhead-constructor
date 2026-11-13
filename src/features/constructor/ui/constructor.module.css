@@ -209,35 +209,63 @@
   .cta { padding: 13px 14px; font-size: 13px; }
 }
 
-/* ─── Мобильная версия (приоритет): холст сверху, вкладки, панель, закреплённый итог ─── */
+/*
+ * ─── Мобильная версия (приоритет) ───
+ * Экран не прокручивается целиком: холст закреплён сверху, под ним вкладки, ниже панель вкладки
+ * со своей прокруткой и итог. Изделие всегда на виду, пока листаешь настройки.
+ */
 @media (max-width: 900px) {
+  :global(html):has(.app), :global(html):has(.app) :global(body) { overflow: hidden; overscroll-behavior: none; }
   .app {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto auto 1fr;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
     grid-template-areas: 'center' 'tabbar' 'panel' 'footer';
     gap: 0; padding: 0;
-    height: auto; min-height: 100vh; min-height: 100dvh; overflow: visible;
+    height: 100vh; height: 100dvh; overflow: hidden;
   }
-  /* Выше, чем было: под изделием теперь плашка цвета. */
-  .center { height: 54dvh; padding: 8px; }
-  .sides { gap: 4px; }
-  .tab, .tabActive { padding: 8px 10px; font-size: 12px; }
+  /* Пока открыта клавиатура — во всю видимую область над ней. */
+  .app[data-kb] { height: var(--vvh, 100dvh); }
+
+  .center {
+    height: 52dvh; padding: 8px 8px 6px; padding-top: max(8px, env(safe-area-inset-top));
+    transition: height var(--t-base) var(--ease-out);
+  }
+  /* Редактирование слоя: высота холста та же (иначе холст меняет размер под пальцем, пока тащишь принт) —
+     вместо этого изделие приближается к принту (DesignStage, focus). */
+  /* Размеры: принт уже готов, изделие — для сверки; степперам нужно место. */
+  .app[data-tab='order'] .center { height: 40dvh; }
+  /* Набор текста: только изделие над клавиатурой, без панели цвета и масштаба. */
+  .center { overflow: hidden; }
+  .app[data-kb] .center { height: calc(var(--vvh, 100dvh) * .45); transition: none; }
+  .app[data-kb] :is(.sides, .toolbar, .tabbar, .footer) { display: none; }
+
+  .sides { gap: 4px; flex-wrap: nowrap; }
+  .tab, .tabActive { flex: 1 1 0; min-width: 0; min-height: 40px; padding: 6px 4px; font-size: 12px; }
   .tabbar {
-    grid-area: tabbar; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 8px;
-    position: sticky; top: 0; z-index: 2; background: var(--paper); border-bottom: 1px solid var(--ink);
+    grid-area: tabbar; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 6px 8px;
+    z-index: 2; background: var(--paper); border-top: 1px solid var(--line); border-bottom: 1px solid var(--ink);
   }
   .tabbarBtn, .tabbarActive {
-    padding: 11px 4px; border: 1px solid var(--ink); border-radius: var(--r-ctl); background: #fff;
+    min-height: 44px; padding: 0 4px; border: 1px solid var(--ink); border-radius: var(--r-ctl); background: #fff;
     font-size: 12px; font-weight: 800; text-transform: uppercase; cursor: pointer;
   }
   .tabbarActive { background: var(--graphite); border-color: var(--graphite); color: var(--lime) !important; }
 
   .panel { border: 0; border-radius: 0; }
   .right { display: contents; }
-  .left, .section { grid-area: panel; border: 0; padding: 16px 16px 24px; background: #fff; }
+  /* Каждая вкладка прокручивается в своей строке сетки; прокрутка не утекает на страницу. */
+  .left, .section {
+    grid-area: panel; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+    border: 0; padding: 16px 16px 24px; background: #fff;
+  }
   .section + .section { border: 0; }
-  /* Шапка редактора слоя прилипает под закреплённые вкладки (их высота — 63px). */
-  .section { --pad: 16px; --edit-top: 62px; }
+  /* Панель — колонка фиксированной высоты: блоки внутри не сжимаются, а прокручиваются. */
+  .left > *, .section > *, .section .full > * { flex-shrink: 0; }
+  /* Шапка редактора слоя прилипает к самому верху своей панели: липкий отступ считается от края
+     внутри padding прокручиваемой панели, поэтому — минус отступ. */
+  .section { --pad: 16px; --edit-top: -16px; }
+  /* Поле в фокусе не прячется под закреплённую шапку редактора. */
+  .section :is(input, textarea) { scroll-margin-top: 76px; scroll-margin-bottom: 12px; }
   /* На мобильном разделы — вкладки: сводки не нужны, каждая вкладка показывает своё целиком. */
   .right[data-editing] .full { display: contents; }
   .right[data-editing] .summary { display: none; }
@@ -249,14 +277,27 @@
   /* Сворачивание слоёв — только на десктопе */
   .layers[hidden] { display: flex; }
 
-  .footer { grid-area: footer; align-self: end; position: sticky; bottom: 0; z-index: 3; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); flex-wrap: nowrap; }
-  .footer .cta { flex: none; }
-  /* Узкий экран: сегменты ниже, у масштаба без процентов — только «−/+». */
-  .toolbar { --seg-h: 36px; gap: 6px; }
-  .history button, .zoom button { padding: 0 6px; }
+  .footer { grid-area: footer; position: relative; z-index: 3; margin: 0; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); flex-wrap: nowrap; }
+  .footer .cta { flex: none; min-height: 48px; }
+  /* Узкий экран: у масштаба без процентов — только «−/+»; кнопки не меньше 40 px под палец. */
+  .toolbar { --seg-h: 40px; gap: 6px; }
+  .history button, .zoom button { min-width: 42px; padding: 0 6px; }
   .colorBar { padding: 0 8px; }
-  .swatch, .swatchActive { width: 22px; height: 22px; }
+  .colors { gap: 14px; }
+  .swatch, .swatchActive { width: 26px; height: 26px; }
   .zoom .zoomValue { display: none; }
+}
+
+/* Телефон боком: холст слева, панель справа — иначе на холст остаётся полоска в треть экрана. */
+@media (max-width: 900px) and (orientation: landscape) and (max-height: 500px) {
+  .app {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-areas: 'center tabbar' 'center panel' 'center footer';
+  }
+  .center, .app[data-editing] .center { height: auto; padding-left: max(8px, env(safe-area-inset-left)); }
+  .app[data-kb] .center { height: auto; }
+  .tabbar { border-top: 0; }
 }
 
 /* Таблица размеров */
