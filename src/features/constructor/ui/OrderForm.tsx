@@ -74,7 +74,7 @@ function demoNumber(): string {
 }
 
 export function OrderForm({ garment, variant, price, stage, endpoint, onClose }: Props) {
-  const { method, side, setSide, selectVariant, layers } = useConstructor();
+  const { method, side, setSide, selectVariant, clearSizes, layers } = useConstructor();
   const [c, setC] = useState<OrderContacts>(EMPTY);
   const { leaving, dismiss } = useDismiss();
   const [state, setState] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
@@ -127,6 +127,24 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
     setActive(productId);
     void shoot(productId);
   };
+  // Убрать цвет из заказа; если он был на превью — показать соседний.
+  const remove = (productId: string) => {
+    if (capturing || price.lines.length < 2) return;
+    const i = price.lines.findIndex((l) => l.productId === productId);
+    clearSizes(productId);
+    if (productId === active) {
+      const next = price.lines[i + 1] ?? price.lines[i - 1];
+      if (next) { setActive(next.productId); void shoot(next.productId); }
+    }
+  };
+  // Пока открыта заявка, страница под ней не прокручивается и не «болтается» от свайпов.
+  useEffect(() => {
+    const html = document.documentElement;
+    const prev = [html.style.overflow, document.body.style.overflow];
+    html.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+    return () => { [html.style.overflow, document.body.style.overflow] = prev; };
+  }, []);
   const cur = shots[Math.min(shot, shots.length - 1)];
   const flip = (d: number) => setShot((i) => (i + d + shots.length) % shots.length);
 
@@ -335,12 +353,18 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
                     </>
                   );
                   return (
-                    <li key={l.productId}>
+                    <li key={l.productId} className={f.lineRow}>
                       {price.lines.length > 1 ? (
-                        <button
-                          type="button" className={f.line} aria-pressed={l.productId === active} disabled={capturing}
-                          onClick={() => pick(l.productId)} title={`Показать превью: ${l.color}`}
-                        >{body}</button>
+                        <>
+                          <button
+                            type="button" className={f.line} aria-pressed={l.productId === active} disabled={capturing}
+                            onClick={() => pick(l.productId)} title={`Показать превью: ${l.color}`}
+                          >{body}</button>
+                          <button
+                            type="button" className={f.lineDel} disabled={capturing} onClick={() => remove(l.productId)}
+                            aria-label={`Убрать из заказа: ${l.color}`} title="Убрать из заказа"
+                          ><Icon name="close" size={16} /></button>
+                        </>
                       ) : (
                         <div className={f.line}>{body}</div>
                       )}

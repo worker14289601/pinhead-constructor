@@ -66,7 +66,7 @@
   animation: zoomIn .45s var(--ease-out) backwards;
 }
 @keyframes zoomIn { from { opacity: 0; scale: .94; } }
-.zoomFig img { display: block; width: min(80vh, calc(100vw - 80px)); height: auto; aspect-ratio: 1; object-fit: contain; }
+.zoomFig img { display: block; width: auto; height: min(72vh, 640px); max-width: calc(100vw - 80px); object-fit: contain; }
 .zoomFig figcaption { font-size: 13px; font-weight: 800; text-transform: uppercase; }
 .arrowBig { width: 44px; height: 44px; }
 .zoomFig .arrowL { left: 16px; }
@@ -77,8 +77,9 @@
 .productMeta { margin: 0; font-size: 13px; color: var(--muted); }
 
 .lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.lineRow { display: flex; align-items: stretch; gap: 6px; }
 .line {
-  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 1px solid transparent; border-radius: 10px;
+  display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; box-sizing: border-box; padding: 8px 10px; border: 1px solid transparent; border-radius: 10px;
   background: #fff; font: inherit; font-size: 14px; color: inherit; text-align: left;
 }
 /* Несколько цветов — строка переключает превью на этот цвет. */
@@ -86,6 +87,13 @@ button.line { cursor: pointer; transition: border-color .2s; }
 button.line[aria-pressed='false']:hover:not(:disabled) { border-color: var(--line); }
 button.line[aria-pressed='true'] { border-color: var(--ink); }
 button.line:disabled { cursor: progress; }
+/* Убрать цвет из заказа */
+.lineDel {
+  flex: none; width: 36px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 10px;
+  background: #fff; color: var(--muted); cursor: pointer; transition: color .2s, background .2s;
+}
+.lineDel:hover:not(:disabled) { color: var(--ink); background: var(--lime-soft); }
+.lineDel:disabled { opacity: .4; cursor: progress; }
 .line i { width: 18px; height: 18px; flex: none; border-radius: 50%; box-shadow: inset 0 0 0 1px rgb(0 0 0 / .25); }
 .lineName, .lineSum { display: flex; flex-direction: column; line-height: 1.25; }
 .lineName { flex: 1; min-width: 0; font-weight: 700; }
@@ -143,10 +151,10 @@ button.line:disabled { cursor: progress; }
 /* ── Телефон: лист на весь экран (100dvh), шапка и кнопка отправки прилипают ── */
 .sheetHead { display: none; }
 @media (max-width: 900px) {
-  .bg { padding: 0; align-items: end; }
+  .bg { padding: 0; align-items: end; overscroll-behavior: none; touch-action: pan-y; }
   .bg .modal, .bg .modalDone {
     width: 100%; max-width: none; height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0;
-    overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+    overflow-x: hidden; overscroll-behavior: none; -webkit-overflow-scrolling: touch;
   }
   .bg:not([data-leaving]) .modal { animation: sheetUp .5s var(--ease-out) backwards; }
   @keyframes sheetUp { from { translate: 0 40px; opacity: 0; } }
@@ -172,13 +180,16 @@ button.line:disabled { cursor: progress; }
   .line { padding: 6px 8px; font-size: 13px; }
   .total { padding-top: 8px; font-size: 13px; }
   .total b { font-size: 20px; }
-  .preview { border-radius: 10px; }
+  .preview { height: 60px; border-radius: 10px; }
   .gallery .arrow, .gallery .shotSide { display: none; }
   .zoomBtn { right: 4px; bottom: 4px; width: 22px; height: 22px; }
   .zoomBtn svg { width: 13px; height: 13px; }
   .zoom { padding: 12px; }
   .zoomFig { padding: 12px 8px; }
-  .zoomFig img { width: calc(100vw - 40px); }
+  /* Подпись и крестик — строкой над картинкой, крестик не закрывает изделие */
+  .zoomFig { box-sizing: border-box; width: 100%; padding-top: 60px; }
+  .zoomFig figcaption { position: absolute; top: 22px; left: 16px; }
+  .zoomFig img { width: 100%; height: auto; max-width: none; max-height: calc(100dvh - 120px); }
   .arrowBig { width: 44px; height: 44px; }
   .zoomFig .arrowL { left: 6px; }
   .zoomFig .arrowR { right: 6px; }
