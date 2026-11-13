@@ -1,3 +1,4 @@
+import { pickupLine } from '../config/pickup';
 import { SIDE_LABEL, type OrderContacts, type PrintMethod, type Side } from '../model/types';
 import type { PriceBreakdown } from '../model/pricing';
 
@@ -188,8 +189,9 @@ async function renderPage(d: OrderPdfData): Promise<HTMLCanvasElement> {
   const c = d.contacts;
   const yDetails = rows('Детали заказа', M, y0, details);
   const yContacts = rows('Контакты', M + cw + colGap, y0, [
-    ['Имя', c.name], ['Телефон', c.phone], ['E-mail', c.email], ['Город', c.city],
-    ['Адрес', c.address || '—'], ['Комментарий', c.comment || '—'],
+    ['Имя', c.name], ['Телефон', c.phone], ['E-mail', c.email],
+    ['Получение', c.delivery === 'delivery' ? `Доставка: ${c.city}${c.address ? `, ${c.address}` : ''}` : `Самовывоз: ${pickupLine()}`],
+    ['Комментарий', c.comment || '—'],
   ]);
 
   // Итог — под контактами.

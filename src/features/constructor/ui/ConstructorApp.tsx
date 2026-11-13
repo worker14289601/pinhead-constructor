@@ -6,12 +6,12 @@ import { track } from '../analytics/events';
 import { getUtm } from '../analytics/utm';
 import { printAreaFor, sidesFor } from '../config/print-areas';
 import { FRAME } from '../config/garment-shapes';
-import { WHITE_MIN_CHANNEL } from '../config/pricing';
 import { hexToRgb, isLight } from '../canvas/tint';
 import { designBounds } from '../model/bounds';
 import { clearDraft, hasContent, loadDraft, saveDraft, type Draft } from '../model/draft';
 import { ensureFont, onFontLoaded } from '../model/fonts';
 import { calcPrice } from '../model/pricing';
+import { METHOD_INFO, WHITE_MIN_CHANNEL } from '../config/pricing';
 import { validateFile, ACCEPTED_TYPES } from '../model/quality';
 import { canRedo, canUndo, selectGarment, selectVariant, useConstructor, variantQty } from '../model/store';
 import { contentBox } from '../model/trim';
@@ -19,6 +19,7 @@ import { SIDE_LABEL, SIDE_TAB } from '../model/types';
 import type { DesignStageHandle } from '../canvas/DesignStage';
 import { MAX_USER_ZOOM, ZOOM_STEP } from '../canvas/zoom';
 import { GarmentPicker } from './GarmentPicker';
+import { Icon } from './icons';
 import { DesignPanel } from './DesignPanel';
 import { DraftPrompt } from './DraftPrompt';
 import { LayersPanel } from './LayersPanel';
@@ -41,6 +42,15 @@ const HistoryIcon = ({ redo }: { redo?: boolean }) => (
     <path d="M9 14 4 9l5-5" />
     <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
   </svg>
+);
+
+/** Свёрнутый раздел правой колонки в режиме редактирования слоя. */
+const SumRow = ({ title, meta, onClick }: { title: string; meta: string; onClick: () => void }) => (
+  <button type="button" className={s.sumRow} onClick={onClick}>
+    <span className={s.sumTitle}>{title}</span>
+    <span className={s.sumMeta}>{meta}</span>
+    <Icon name="chevronRight" size={18} />
+  </button>
 );
 
 type Tab = 'garment' | 'design' | 'layers' | 'order';
@@ -86,6 +96,12 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
   useEffect(() => {
     if (orderOpen) return;
     const onKey = (e: KeyboardEvent) => {
+      // Esc — «Готово»: закрыть настройки слоя, даже из поля ввода (пока не открыта таблица размеров).
+      if (e.key === 'Escape' && !chartOpen && useConstructor.getState().selectedLayerId) {
+        (document.activeElement as HTMLElement | null)?.blur?.();
+        useConstructor.getState().selectLayer(null);
+        return;
+      }
       const t = e.target as HTMLElement | null;
       if (t && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName))) return;
       const st = useConstructor.getState();
@@ -104,7 +120,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [orderOpen]);
+  }, [orderOpen, chartOpen]);
 
   // Черновик: при открытии спрашиваем, продолжать ли; пока не ответили — ничего не сохраняем.
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -183,6 +199,17 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
 
   const addText = () => { st.addText(isLight(hex) ? '#111111' : '#ffffff'); track('text_add'); };
   const selected = st.layers.find((l) => l.id === st.selectedLayerId);
+
+  // «Готово» из строки-сводки: снимаем выбор и показываем раздел целиком.
+  const layersRef = useRef<HTMLElement>(null);
+  const orderRef = useRef<HTMLElement>(null);
+  const finishTo = (to: 'layers' | 'order') => {
+    st.selectLayer(null);
+    if (to === 'layers') setLayersOpen(true);
+    requestAnimationFrame(() => (to === 'layers' ? layersRef : orderRef).current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  };
+  const sideLayerCount = st.layers.filter((l) => l.side === st.side).length;
+  const methodName = METHOD_INFO[st.method].title.split(/\s+[—–-]\s+/)[0];
 
   const hasDesign = st.layers.some((l) => sides.includes(l.side));
   const openOrder = () => {
@@ -280,7 +307,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
         ))}
       </nav>
 
-      <aside className={`${s.panel} ${s.right}`}>
+      <aside className={`${s.panel} ${s.right}`} data-editing={selected ? '' : undefined}>
         {/* Дизайн: содержимое зависит от выбранного слоя */}
         <section className={s.section} data-section="design">
           <DesignPanel stage={stageRef} fileError={fileError} onUpload={() => fileRef.current?.click()} onAddText={addText} />
@@ -291,13 +318,24 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
         </section>
 
         {/* Слои */}
-        <section className={s.section} data-section="layers" data-collapsed={layersOpen ? undefined : ''}>
-          <LayersPanel hex={hex} open={layersOpen} onToggle={() => setLayersOpen((v) => !v)} />
+        <section ref={layersRef} className={s.section} data-section="layers" data-collapsed={layersOpen ? undefined : ''}>
+          <div className={s.summary}>
+            <SumRow title="Слои" meta={sideLayerCount ? `${sideLayerCount} на стороне` : 'пусто'} onClick={() => finishTo('layers')} />
+          </div>
+          <div className={s.full}>
+            <LayersPanel hex={hex} open={layersOpen} onToggle={() => setLayersOpen((v) => !v)} />
+          </div>
         </section>
 
         {/* Размеры */}
-        <section className={s.section} data-section="order">
-          <OrderPanel variant={variant} price={price} onSizeChart={() => setChartOpen(true)} />
+        <section ref={orderRef} className={s.section} data-section="order">
+          <div className={s.summary}>
+            <SumRow title="Нанесение" meta={methodName} onClick={() => finishTo('order')} />
+            <SumRow title="Размеры" meta={price?.qty ? `${price.qty} шт` : 'не выбраны'} onClick={() => finishTo('order')} />
+          </div>
+          <div className={s.full}>
+            <OrderPanel variant={variant} price={price} onSizeChart={() => setChartOpen(true)} />
+          </div>
         </section>
 
         {/* Итог — на мобильном закреплён внизу */}

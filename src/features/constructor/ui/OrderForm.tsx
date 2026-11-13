@@ -1,14 +1,18 @@
 'use client';
-import { useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { track, trackPurchase } from '../analytics/events';
 import { getUtm } from '../analytics/utm';
 import type { PriceBreakdown } from '../model/pricing';
 import { useConstructor } from '../model/store';
 import { sidesFor } from '../config/print-areas';
-import { type Garment, type GarmentVariant, type OrderContacts, type Side } from '../model/types';
+import { METHOD_INFO } from '../config/pricing';
+import { PICKUP } from '../config/pickup';
+import { SIDE_LABEL, SIDE_TAB, type Garment, type GarmentVariant, type OrderContacts, type Side } from '../model/types';
 import type { DesignStageHandle } from '../canvas/DesignStage';
 import { buildOrderPdf } from '../pdf/orderPdf';
+import { Icon } from './icons';
 import s from './constructor.module.css';
+import f from './orderForm.module.css';
 import { useDismiss } from './useDismiss';
 
 interface Props {
@@ -21,13 +25,32 @@ interface Props {
   onClose: () => void;
 }
 
-const EMPTY: OrderContacts = { name: '', phone: '', email: '', city: '', address: '', comment: '', consent: false };
+const EMPTY: OrderContacts = { name: '', phone: '', email: '', delivery: 'pickup', city: '', address: '', comment: '', consent: false };
 
 /** dataURL снимка → PNG. Пустой снимок (браузер не смог создать canvas) — ошибка, а не пустой файл в заявке. */
 async function toPng(dataUrl: string): Promise<Blob> {
   const blob = await (await fetch(dataUrl)).blob();
   if (blob.type !== 'image/png' || blob.size === 0) throw new Error('export_empty');
   return blob;
+}
+
+const rub = (n: number) => `${n.toLocaleString('ru-RU')} ₽`;
+
+/** Что происходит после отправки — показываем и до, и после. */
+const NEXT_STEPS = [
+  'Менеджер проверит макет и свяжется с вами',
+  'Подтвердит итоговую цену и сроки',
+  'Оплата — после подтверждения, сейчас платить не нужно',
+];
+
+/** Поле с подписью над ним; звёздочка — обязательное. */
+function Field({ label, required, wide, children }: { label: string; required?: boolean; wide?: boolean; children: React.ReactNode }) {
+  return (
+    <label className={wide ? `${f.field} ${f.wide}` : f.field}>
+      <span className={f.label}>{label}{required ? <i aria-hidden> *</i> : <small> — необязательно</small>}</span>
+      {children}
+    </label>
+  );
 }
 
 function download(blob: Blob, name: string) {
@@ -46,10 +69,60 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
   const { leaving, dismiss } = useDismiss();
   const [state, setState] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
   const [done, setDone] = useState<{ number: string; pdf: Blob } | null>(null);
+  // Превью для сводки: снимок каждой стороны с принтом (перед — первым). Холст на это время
+  // перебирает стороны за размытым фоном и возвращается туда, где был.
+  const [shots, setShots] = useState<Array<{ side: Side; src: string }>>([]);
+  const [capturing, setCapturing] = useState(true);
+  const [shot, setShot] = useState(0);
+  const [zoomed, setZoomed] = useState(false);
+  const started = useRef(false);
+  const touchX = useRef(0); // свайп в увеличенном просмотре
+  useEffect(() => {
+    if (started.current) return; // StrictMode вызывает эффект дважды
+    started.current = true;
+    (async () => {
+      const sides = sidesFor(garment).filter((sd) => layers.some((l) => l.side === sd));
+      const out: Array<{ side: Side; src: string }> = [];
+      stage.current?.setTurnEnabled(false);
+      try {
+        for (const sd of sides) {
+          setSide(sd);
+          if (!stage.current) break;
+          await stage.current.whenReady();
+          const src = stage.current.exportPreview();
+          if (src) { out.push({ side: sd, src }); setShots([...out]); }
+        }
+      } catch {
+        // Без превью заявку всё равно можно отправить.
+      } finally {
+        setSide(side);
+        stage.current?.setTurnEnabled(true);
+        setCapturing(false);
+      }
+    })();
+    // Снимки — один раз при открытии.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const cur = shots[Math.min(shot, shots.length - 1)];
+  const flip = (d: number) => setShot((i) => (i + d + shots.length) % shots.length);
+
+  const ship = c.delivery === 'delivery';
+  const close = () => state !== 'sending' && dismiss(onClose);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { if (zoomed) setZoomed(false); else close(); }
+      else if (zoomed && shots.length > 1 && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) flip(e.key === 'ArrowLeft' ? -1 : 1);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+  const printed = price.lines[0]?.sides ?? price.current?.sides ?? [];
+  const methodName = METHOD_INFO[method].title.split(/\s+[—–-]\s+/)[0];
   const field = (k: keyof OrderContacts) => (e: { target: { value: string } }) => setC({ ...c, [k]: e.target.value });
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (capturing) return; // холст ещё перебирает стороны для превью
     setState('sending');
     track('order_send', { total: price.total, qty: price.qty });
     try {
@@ -96,7 +169,10 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
       let i = 0;
       for (const [src, name] of images) form.append(`original_${i++}`, await (await fetch(src)).blob(), name);
 
-      const contacts: OrderContacts = { ...c, name: c.name.trim(), phone: c.phone.trim(), email: c.email.trim(), city: c.city.trim() };
+      const contacts: OrderContacts = {
+        ...c, name: c.name.trim(), phone: c.phone.trim(), email: c.email.trim(),
+        city: ship ? c.city.trim() : '', address: ship ? c.address?.trim() : '',
+      };
       const pdf = await buildOrderPdf({
         number, createdAt: new Date(), garment: garment.name, method, price, contacts, previews, fileNames: [...images.values()],
       });
@@ -130,50 +206,187 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
   };
 
   return (
-    <div className={s.modalBg} data-leaving={leaving || undefined} onClick={() => state !== 'sending' && dismiss(onClose)}>
-      <form className={s.modal} onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+    <div className={`${s.modalBg} ${f.bg}`} data-leaving={leaving || undefined} onClick={close}>
+      <form
+        className={`${s.modal} ${f.modal} ${state === 'done' ? f.modalDone : ''}`} onClick={(e) => e.stopPropagation()} onSubmit={submit}
+        role="dialog" aria-modal="true" aria-labelledby="order-title"
+      >
+        <button type="button" className={f.close} onClick={close} disabled={state === 'sending'} aria-label="Закрыть" title="Закрыть (Esc)">
+          <Icon name="close" size={20} />
+        </button>
+
         {state === 'done' && done ? (
-          <>
-            <h3 className={s.reveal}>Заявка отправлена</h3>
-            <p className={s.muted}>Номер заказа</p>
+          <div className={f.done}>
+            <span className={f.doneIcon}><Icon name="checkMark" size={34} /></span>
+            <h3 id="order-title" className={s.reveal}>Заявка отправлена</h3>
+            <p className={f.doneLead}>Номер заказа — назовите его менеджеру:</p>
             <p className={s.orderNumber}>{done.number}</p>
-            <p>Менеджер свяжется с вами, проверит макет и подтвердит стоимость. Назовите ему этот номер.</p>
-            <button
-              type="button" className={s.btn}
-              onClick={() => { download(done.pdf, `order_${done.number}.pdf`); track('pdf_download'); }}
-            >
-              Скачать PDF заказа
-            </button>
-            <button type="button" className={s.cta} onClick={() => dismiss(onClose)}>Готово</button>
-          </>
+            <ol className={f.steps}>{NEXT_STEPS.map((x) => <li key={x}>{x}</li>)}</ol>
+            <div className={f.doneActions}>
+              <button
+                type="button" className={s.btn}
+                onClick={() => { download(done.pdf, `order_${done.number}.pdf`); track('pdf_download'); }}
+              >
+                Скачать PDF заказа
+              </button>
+              <button type="button" className={s.cta} onClick={() => dismiss(onClose)}>Готово</button>
+            </div>
+          </div>
         ) : (
-          <>
-            <h3>Оформление заявки</h3>
-            <p className={s.muted}>{garment.name}, {price.lines.map((l) => l.color).join(', ')} · {price.qty} шт · {price.total.toLocaleString('ru-RU')} ₽</p>
-            <input className={s.input} required maxLength={100} autoComplete="name" placeholder="Имя"
-              value={c.name} onChange={field('name')} />
-            <input className={s.input} required type="tel" maxLength={30} autoComplete="tel" placeholder="Телефон"
-              pattern=".*\d.*\d.*\d.*\d.*\d.*" title="Номер телефона с кодом города или оператора"
-              value={c.phone} onChange={field('phone')} />
-            <input className={s.input} required type="email" maxLength={100} autoComplete="email" placeholder="E-mail"
-              value={c.email} onChange={field('email')} />
-            <input className={s.input} required maxLength={100} autoComplete="address-level2" placeholder="Город"
-              value={c.city} onChange={field('city')} />
-            <input className={s.input} maxLength={200} autoComplete="street-address" placeholder="Адрес доставки (необязательно)"
-              value={c.address ?? ''} onChange={field('address')} />
-            <textarea className={s.input} maxLength={1500} placeholder="Комментарий (необязательно)"
-              value={c.comment ?? ''} onChange={field('comment')} />
-            <label className={s.check}>
-              <input type="checkbox" required checked={c.consent} onChange={(e) => setC({ ...c, consent: e.target.checked })} />
-              <span>Согласен на обработку персональных данных</span>
-            </label>
-            {state === 'error' && <p className={s.err}>Не удалось отправить. Попробуйте ещё раз.</p>}
-            <button className={s.cta} disabled={state === 'sending'}>
-              {state === 'sending' ? 'Отправляем…' : 'Отправить заявку'}
-            </button>
-          </>
+          <div className={f.grid}>
+            {/* Сводка: что именно заказываем */}
+            <aside className={f.summary}>
+              <p className={f.kicker}>Ваш заказ</p>
+              <div className={f.product}>
+                <div className={f.gallery}>
+                  {cur ? (
+                    <button type="button" className={f.shotBtn} onClick={() => setZoomed(true)} aria-label="Увеличить превью">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img className={f.preview} src={cur.src} alt={`Превью: ${SIDE_LABEL[cur.side].toLowerCase()}`} />
+                    </button>
+                  ) : (
+                    <div className={`${f.preview} ${f.previewStub}`} aria-hidden />
+                  )}
+                  {cur && <span className={f.shotSide}>{SIDE_TAB[cur.side]}{shots.length > 1 && ` · ${shot + 1}/${shots.length}`}</span>}
+                  {shots.length > 1 && (
+                    <>
+                      <button type="button" className={`${f.arrow} ${f.arrowL}`} onClick={() => flip(-1)} aria-label="Предыдущая сторона">
+                        <Icon name="chevronRight" size={18} />
+                      </button>
+                      <button type="button" className={`${f.arrow} ${f.arrowR}`} onClick={() => flip(1)} aria-label="Следующая сторона">
+                        <Icon name="chevronRight" size={18} />
+                      </button>
+                    </>
+                  )}
+                  {cur && (
+                    <button type="button" className={f.zoomBtn} onClick={() => setZoomed(true)} aria-label="Увеличить" title="Увеличить">
+                      <Icon name="expand" size={18} />
+                    </button>
+                  )}
+                </div>
+                <div className={f.productText}>
+                  <p className={f.productName}>{garment.name}</p>
+                  <p className={f.productMeta}>
+                    {methodName}
+                    {printed.length > 0 && ` · ${printed.map((x) => `${SIDE_LABEL[x.side].toLowerCase()} ${x.format}`).join(', ')}`}
+                  </p>
+                </div>
+              </div>
+              <ul className={f.lines}>
+                {price.lines.map((l) => (
+                  <li key={l.productId} className={f.line}>
+                    <i style={{ background: l.hex }} />
+                    <span className={f.lineName}>{l.color}<small>{l.sizes.map(([k, n]) => `${k}×${n}`).join(', ')}</small></span>
+                    <span className={f.lineSum}>{l.qty} шт<small>{rub(l.total)}</small></span>
+                  </li>
+                ))}
+              </ul>
+              <div className={f.total}>
+                <span>Итого · {price.qty} шт</span>
+                <b>{rub(price.total)}</b>
+              </div>
+              <ol className={f.steps}>{NEXT_STEPS.map((x) => <li key={x}>{x}</li>)}</ol>
+            </aside>
+
+            {/* Контакты */}
+            <div className={f.fields}>
+              <h3 id="order-title">Оформление заявки</h3>
+              <fieldset className={f.group}>
+                <legend className={f.legend}>Контакты</legend>
+                <Field label="Имя" required wide>
+                  <input className={s.input} required maxLength={100} autoComplete="name" placeholder="Как к вам обращаться"
+                    value={c.name} onChange={field('name')} />
+                </Field>
+                <Field label="Телефон" required>
+                  <input className={s.input} required type="tel" maxLength={30} autoComplete="tel" placeholder="+7 900 000-00-00"
+                    pattern=".*\d.*\d.*\d.*\d.*\d.*" title="Номер телефона с кодом города или оператора"
+                    value={c.phone} onChange={field('phone')} />
+                </Field>
+                <Field label="E-mail" required>
+                  <input className={s.input} required type="email" maxLength={100} autoComplete="email" placeholder="name@mail.ru"
+                    value={c.email} onChange={field('email')} />
+                </Field>
+              </fieldset>
+              <fieldset className={f.group}>
+                <legend className={f.legend}>Получение</legend>
+                <div className={`${f.wide} ${f.seg}`} role="radiogroup" aria-label="Способ получения">
+                  {([['pickup', 'Самовывоз'], ['delivery', 'Доставка']] as const).map(([v, label]) => (
+                    <button
+                      key={v} type="button" role="radio" aria-checked={c.delivery === v}
+                      className={c.delivery === v ? f.segActive : f.segBtn} onClick={() => setC({ ...c, delivery: v })}
+                    >{label}</button>
+                  ))}
+                </div>
+                {/* Оба варианта лежат в одной ячейке: высота — по большему, поэтому окно не прыгает при переключении. */}
+                <div className={`${f.wide} ${f.swap}`}>
+                  <div className={f.pickup} data-on={!ship || undefined} aria-hidden={ship}>
+                    <Icon name="mapPin" size={20} />
+                    <span><b>{PICKUP.place}</b>{PICKUP.address} · {PICKUP.metro}</span>
+                  </div>
+                  <div className={f.ship} data-on={ship || undefined} aria-hidden={!ship}>
+                    <Field label="Город" required>
+                      <input className={s.input} required={ship} maxLength={100} autoComplete="address-level2" placeholder="Москва"
+                        value={c.city} onChange={field('city')} />
+                    </Field>
+                    <Field label="Адрес">
+                      <input className={s.input} maxLength={200} autoComplete="street-address" placeholder="Улица, дом, офис"
+                        value={c.address ?? ''} onChange={field('address')} />
+                    </Field>
+                    <p className={`${f.wide} ${f.hint}`}>Стоимость доставки менеджер посчитает отдельно.</p>
+                  </div>
+                </div>
+              </fieldset>
+              <div className={f.group}>
+                <Field label="Комментарий" wide>
+                  <textarea className={`${s.input} ${f.textarea}`} maxLength={1500} rows={3} placeholder="Сроки, пожелания к печати, вопросы"
+                    value={c.comment ?? ''} onChange={field('comment')} />
+                </Field>
+              </div>
+              <div className={f.submit}>
+                <label className={s.check}>
+                  <input type="checkbox" required checked={c.consent} onChange={(e) => setC({ ...c, consent: e.target.checked })} />
+                  <span>Согласен на обработку персональных данных</span>
+                </label>
+                {state === 'error' && <p className={s.err}>Не удалось отправить. Проверьте интернет и попробуйте ещё раз.</p>}
+                <button className={`${s.cta} ${f.send}`} disabled={state === 'sending' || capturing}>
+                  <span>{state === 'sending' ? 'Отправляем…' : 'Отправить заявку'}</span>
+                  {state !== 'sending' && <span className={f.sendSum}>{rub(price.total)}</span>}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </form>
+
+      {zoomed && cur && (
+        <div className={f.zoom} onClick={(e) => { e.stopPropagation(); setZoomed(false); }} role="dialog" aria-label="Превью дизайна">
+          <figure
+            className={f.zoomFig} onClick={(e) => e.stopPropagation()}
+            onTouchStart={(e) => { touchX.current = e.touches[0].clientX; }}
+            onTouchEnd={(e) => {
+              const dx = e.changedTouches[0].clientX - touchX.current;
+              if (shots.length > 1 && Math.abs(dx) > 40) flip(dx > 0 ? -1 : 1);
+            }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={cur.src} alt={`Превью: ${SIDE_LABEL[cur.side].toLowerCase()}`} />
+            <figcaption>{SIDE_LABEL[cur.side]}{shots.length > 1 && ` · ${shot + 1} из ${shots.length}`}</figcaption>
+            {shots.length > 1 && (
+              <>
+                <button type="button" className={`${f.arrow} ${f.arrowL} ${f.arrowBig}`} onClick={() => flip(-1)} aria-label="Предыдущая сторона">
+                  <Icon name="chevronRight" size={22} />
+                </button>
+                <button type="button" className={`${f.arrow} ${f.arrowR} ${f.arrowBig}`} onClick={() => flip(1)} aria-label="Следующая сторона">
+                  <Icon name="chevronRight" size={22} />
+                </button>
+              </>
+            )}
+            <button type="button" className={`${f.close} ${f.zoomClose}`} onClick={() => setZoomed(false)} aria-label="Закрыть просмотр">
+              <Icon name="close" size={20} />
+            </button>
+          </figure>
+        </div>
+      )}
     </div>
   );
 }

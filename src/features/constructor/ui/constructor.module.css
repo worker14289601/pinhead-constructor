@@ -47,8 +47,27 @@
 .panel { background: #fff; overflow-y: auto; overscroll-behavior: contain; min-height: 0; border: 1px solid var(--ink); border-radius: var(--r-card); }
 .left { grid-area: left; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
 .right { grid-area: right; display: flex; flex-direction: column; overflow-x: hidden; }
-.section { padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+.section { --pad: 20px; padding: var(--pad); display: flex; flex-direction: column; gap: 10px; }
 .section + .section { border-top: 1px solid var(--line); }
+
+/*
+ * Режим редактирования слоя (десктоп): слои, нанесение и размеры сворачиваются в строки-сводки,
+ * чтобы настройки не уводили их вниз. Тап по строке — «Готово» и переход к разделу.
+ */
+.summary { display: none; }
+.full { display: contents; }
+.right[data-editing] .full { display: none; }
+.right[data-editing] .summary { display: flex; flex-direction: column; gap: 6px; }
+.right[data-editing] .section:not([data-section='design']) { padding-top: 12px; padding-bottom: 12px; }
+.sumRow {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 8px 10px 8px 12px; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 10px; background: #fff; text-align: left;
+  transition: border-color var(--t-fast), background-color var(--t-fast);
+}
+.sumRow:hover { border-color: var(--ink); background: var(--lime-soft); }
+.sumTitle { font-family: var(--font-head); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; }
+.sumMeta { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sumRow svg { flex: none; }
 
 /* Заголовки секций — как «> ФУТБОЛКИ» на сайте */
 .h {
@@ -183,6 +202,7 @@
 @media (max-width: 1200px) and (min-width: 901px) {
   .app { grid-template-columns: 240px minmax(0, 1fr) 320px; gap: 10px; padding: 10px; }
   .left, .section { padding: 16px; }
+  .section { --pad: 16px; }
   .sides { gap: 4px; }
   .tab, .tabActive { padding: 7px 9px; font-size: 12px; }
   .footer { padding: 14px 16px; }
@@ -216,6 +236,12 @@
   .right { display: contents; }
   .left, .section { grid-area: panel; border: 0; padding: 16px 16px 24px; background: #fff; }
   .section + .section { border: 0; }
+  /* Шапка редактора слоя прилипает под закреплённые вкладки (их высота — 63px). */
+  .section { --pad: 16px; --edit-top: 62px; }
+  /* На мобильном разделы — вкладки: сводки не нужны, каждая вкладка показывает своё целиком. */
+  .right[data-editing] .full { display: contents; }
+  .right[data-editing] .summary { display: none; }
+  .right[data-editing] .section:not([data-section='design']) { padding: 16px 16px 24px; }
   .app[data-tab='garment'] :is([data-section='design'], [data-section='layers'], [data-section='order']),
   .app[data-tab='design'] :is([data-section='garment'], [data-section='layers'], [data-section='order']),
   .app[data-tab='layers'] :is([data-section='garment'], [data-section='design'], [data-section='order']),

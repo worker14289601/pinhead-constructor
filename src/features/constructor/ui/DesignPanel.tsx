@@ -4,7 +4,7 @@ import type { DesignStageHandle } from '../canvas/DesignStage';
 import { printAreaFor } from '../config/print-areas';
 import { imageDpi, MIN_DPI } from '../model/quality';
 import { selectGarment, useConstructor } from '../model/store';
-import { SIDE_LABEL } from '../model/types';
+import { SIDE_LABEL, SIDE_TAB } from '../model/types';
 import { Icon, type IconName } from './icons';
 import { TextPanel } from './TextPanel';
 import s from './constructor.module.css';
@@ -39,12 +39,13 @@ export function DesignPanel({ stage, fileError, onUpload, onAddText }: Props) {
     { icon: 'flip', label: 'Отразить по горизонтали', run: () => updateLayer(selected.id, { flipX: !selected.flipX }), pressed: !!selected.flipX },
   ] : [];
 
+  const kindLabel = selected?.kind === 'text' ? 'Текст' : 'Картинка';
+
   return (
     <>
-      <h3 className={s.h}>Дизайн · {SIDE_LABEL[side]}</h3>
-
       {!selected ? (
         <>
+          <h3 className={s.h}>Дизайн · {SIDE_LABEL[side]}</h3>
           <div className={d.actions}>
             <button className={d.cardPrimary} onClick={onUpload}>
               <Icon name="upload" size={24} />
@@ -58,23 +59,20 @@ export function DesignPanel({ stage, fileError, onUpload, onAddText }: Props) {
           </div>
           <p className={s.muted}>Лучше PNG с прозрачным фоном. Файл можно перетащить на изделие.</p>
         </>
-      ) : (
-        <div className={d.addRow}>
-          <button className={d.addBtn} onClick={onUpload}><Icon name="plus" size={18} />Картинка</button>
-          <button className={d.addBtn} onClick={onAddText}><Icon name="plus" size={18} />Текст</button>
-        </div>
-      )}
+      ) : null}
       {fileError && <p className={s.err}>{fileError}</p>}
 
       {selected && (
         <div className={d.body} key={selected.id}>
-          <div className={d.head}>
+          {/* Режим редактирования: шапка закреплена, «Готово» всегда под рукой и возвращает обычный вид панели. */}
+          <div className={d.editHead}>
             <span className={d.chip}>
               <span className={d.chipIcon}><Icon name={selected.kind === 'text' ? 'text' : 'image'} size={18} /></span>
-              {selected.kind === 'text' ? 'Текст' : 'Картинка'}
+              {kindLabel}
+              <span className={d.chipSide}>· {SIDE_TAB[side]}</span>
             </span>
-            <button className={d.closeBtn} onClick={() => selectLayer(null)} title="Снять выбор" aria-label="Снять выбор">
-              <Icon name="close" size={18} />
+            <button type="button" className={d.doneBtn} onClick={() => selectLayer(null)} title="Готово (Esc)">
+              <Icon name="checkMark" size={18} />Готово
             </button>
           </div>
 

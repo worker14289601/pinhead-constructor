@@ -13,7 +13,7 @@ export interface Order {
   total: number;
   /** Печать по сторонам — готовые строки для сообщения. */
   sides: string[];
-  contacts: { name: string; phone: string; email: string; city: string; address: string; comment: string };
+  contacts: { name: string; phone: string; email: string; delivery: 'pickup' | 'delivery'; city: string; address: string; comment: string };
   utm: Record<string, string>;
   page: string;
   files: OrderFile[];
@@ -113,10 +113,13 @@ export async function parseOrder(req: Request): Promise<Order> {
   const c = obj(raw.contacts);
   const contacts = {
     name: str(c.name, 100), phone: str(c.phone, 30), email: str(c.email, 100),
+    // Без поля delivery (старые клиенты) — доставка, если указан город.
+    delivery: (c.delivery === 'delivery' || (c.delivery === undefined && str(c.city, 100)) ? 'delivery' : 'pickup') as 'pickup' | 'delivery',
     city: str(c.city, 100), address: str(c.address, 200), comment: str(c.comment, 1500),
   };
+  if (contacts.delivery === 'pickup') { contacts.city = ''; contacts.address = ''; }
   const okEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contacts.email);
-  if (!contacts.name || contacts.phone.replace(/\D/g, '').length < 5 || !okEmail || !contacts.city) {
+  if (!contacts.name || contacts.phone.replace(/\D/g, '').length < 5 || !okEmail || (contacts.delivery === 'delivery' && !contacts.city)) {
     throw new BadOrder('bad_contacts');
   }
   if (c.consent !== true) throw new BadOrder('no_consent');
@@ -177,7 +180,7 @@ export function orderText(o: Order): string {
     ...o.lines.map((l) => `${l.color}: ${l.sizes.map(([k, n]) => `${k}×${n}`).join(', ')} — ${l.qty} шт × ${rub(l.perItem)} = ${rub(l.total)}`),
     `Всего: ${o.qty} шт, сумма по расчёту конструктора: ${rub(o.total)}`,
     `Клиент: ${c.name}, ${c.phone}, ${c.email}`,
-    `Город: ${c.city}${c.address ? `, адрес: ${c.address}` : ''}`,
+    c.delivery === 'delivery' ? `Доставка: ${c.city}${c.address ? `, ${c.address}` : ''}` : 'Получение: самовывоз из студии',
     c.comment ? `Комментарий: ${c.comment}` : '',
     utm ? `UTM: ${utm}` : '',
     o.page ? `Страница: ${o.page}` : '',

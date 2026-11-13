@@ -130,6 +130,8 @@ export interface OrderContacts {
   name: string;
   phone: string;
   email: string;
+  /** Самовывоз из студии или доставка; город обязателен только для доставки. */
+  delivery: 'pickup' | 'delivery';
   city: string;
   address?: string;
   comment?: string;
