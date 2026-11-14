@@ -53,6 +53,8 @@ const MB = 1024 * 1024;
 const MAX_LINES = 20;
 /** Общий предел размера всех файлов заявки. */
 const TOTAL_MAX_MB = 300;
+/** Предел всего запроса: файлы плюс запас на JSON заявки и разметку multipart. Проверяется до чтения тела. */
+const BODY_MAX = (TOTAL_MAX_MB + 5) * MB;
 const PNG = ['image/png'];
 const IMAGES = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'];
 
@@ -72,8 +74,40 @@ const obj = (v: unknown): Record<string, unknown> =>
 const safeName = (name: string, fallback: string) =>
   name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').replace(/^\.+/, '').slice(-80) || fallback;
 
+/**
+ * Расширение по типу и проверка начала файла: тип присылает клиент, поэтому верим только содержимому.
+ * Расширение ставим сами — иначе под видом картинки менеджеру придёт, например, .exe или .html.
+ */
+const startsWith = (b: Uint8Array, sig: number[], at = 0) => sig.every((x, i) => b[at + i] === x);
+const FILE_KINDS: Record<string, { ext: string; looksRight: (head: Uint8Array) => boolean }> = {
+  'image/png': { ext: 'png', looksRight: (b) => startsWith(b, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) },
+  'image/jpeg': { ext: 'jpg', looksRight: (b) => startsWith(b, [0xff, 0xd8, 0xff]) },
+  'image/webp': { ext: 'webp', looksRight: (b) => startsWith(b, [0x52, 0x49, 0x46, 0x46]) && startsWith(b, [0x57, 0x45, 0x42, 0x50], 8) },
+  'image/svg+xml': { ext: 'svg', looksRight: (b) => new TextDecoder().decode(b).toLowerCase().includes('<svg') },
+  'application/pdf': { ext: 'pdf', looksRight: (b) => startsWith(b, [0x25, 0x50, 0x44, 0x46, 0x2d]) },
+};
+/** Сколько байт начала файла читаем для проверки (у SVG перед <svg бывают заголовок и комментарии). */
+const HEAD_BYTES = 4096;
+
+/** Хост, на котором открыт сайт; за прокси — из x-forwarded-host. */
+const siteHost = (req: Request) => (req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? '').split(',')[0].trim();
+const originHost = (origin: string) => {
+  try {
+    return new URL(origin).host;
+  } catch {
+    return '';
+  }
+};
+
 /** Разбирает и проверяет multipart-заявку. Бросает BadOrder с кодом ошибки. */
 export async function parseOrder(req: Request): Promise<Order> {
+  // Браузер шлёт Origin с каждым POST: заявку с чужого сайта не принимаем.
+  const origin = req.headers.get('origin');
+  if (origin && originHost(origin) !== siteHost(req)) throw new BadOrder('bad_origin', 403);
+  // Размер проверяем до formData(): она читает всё тело в память.
+  const length = Number(req.headers.get('content-length'));
+  if (!length) throw new BadOrder('length_required', 411);
+  if (length > BODY_MAX) throw new BadOrder('file_too_large', 413);
   if (!req.headers.get('content-type')?.includes('multipart/form-data')) throw new BadOrder('bad_content_type', 415);
   let form: FormData;
   let raw: Record<string, unknown>;
@@ -101,12 +135,14 @@ export async function parseOrder(req: Request): Promise<Order> {
     if (v.size > rule.maxMb * MB) throw new BadOrder('file_too_large', 413);
     totalSize += v.size;
     if (totalSize > TOTAL_MAX_MB * MB) throw new BadOrder('file_too_large', 413);
+    const kind = FILE_KINDS[v.type];
+    if (!kind.looksRight(new Uint8Array(await v.slice(0, HEAD_BYTES).arrayBuffer()))) throw new BadOrder('bad_file');
     const m = key.match(rule.key)!;
     // Превью по цветам: индекс — номер строки заявки, в подписи нужен её цвет.
     const pv = key.match(PREVIEW_KEY);
     const color = pv ? str(obj(rawOrderLines[Number(pv[1])]).color, 60) : '';
     const title = pv ? `Макет на изделии: ${color ? `${color}, ` : ''}${SIDE_NAME[pv[2]]}` : rule.title(m);
-    files.push({ title, name: `${number}_${safeName(v.name, key)}`, file: v });
+    files.push({ title, name: `${number}_${safeName(v.name.replace(/\.[^.]*$/, ''), key)}.${kind.ext}`, file: v });
   }
   if (![...seen].some((k) => k.startsWith('print_'))) throw new BadOrder('no_print_file');
 

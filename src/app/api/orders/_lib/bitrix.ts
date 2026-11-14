@@ -1,5 +1,8 @@
 import { orderText, type Order } from './parse';
 
+/** COMMENTS сделки — HTML: текст клиента экранируем, переносы строк ставим сами. */
+const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
 /**
  * Заявка в Битрикс24 через входящий вебхук (права: CRM).
  * Создаётся контакт и сделка; файлы прикладываются комментариями в ленту сделки — по одному на файл,
@@ -50,7 +53,7 @@ export async function sendToBitrix(o: Order, webhook: string, categoryId?: strin
       OPENED: 'Y',
       OPPORTUNITY: o.total,
       CURRENCY_ID: 'RUB',
-      COMMENTS: orderText(o).replace(/\n/g, '<br>'),
+      COMMENTS: escapeHtml(orderText(o)).replace(/\n/g, '<br>'),
       SOURCE_DESCRIPTION: o.page || 'Конструктор',
       UTM_SOURCE: o.utm.source,
       UTM_MEDIUM: o.utm.medium,
