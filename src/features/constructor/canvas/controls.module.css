@@ -52,6 +52,9 @@
 .emptyZoneDark { --ez-fill: rgb(255 255 255 / .04); --ez-fill-hover: rgb(255 255 255 / .12); --ez-ink: #fff; }
 /* Насыщенные средние цвета (бордовый, фуксия): светлая дымка и белая надпись. */
 .emptyZoneVivid { --ez-fill: rgb(255 255 255 / .06); --ez-fill-hover: rgb(255 255 255 / .16); --ez-ink: #fff; }
+/* На десктопе общий сброс кнопок (.app button { color: inherit }) сильнее одного класса и красил подпись в чёрный
+   даже на тёмной ткани — поэтому цвет задаём селектором с двойным классом. */
+.emptyZone.emptyZone { color: var(--ez-ink, #111); }
 .emptyZone:hover { background-color: var(--ez-fill-hover); }
 .emptyZone:active { background-color: var(--ez-fill-hover); }
 .emptyZone:focus-visible { outline: 2px solid #000; outline-offset: 2px; background-color: var(--ez-fill-hover); }

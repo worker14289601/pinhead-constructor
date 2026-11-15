@@ -105,7 +105,7 @@
  * радиус как у вкладок сторон, одна высота. Края равной ширины — цвет стоит ровно по центру.
  */
 /* Центр может сжиматься: длинная палитра прокручивается, а не заезжает под масштаб */
-.toolbar { --seg-h: 40px; display: grid; grid-template-columns: minmax(max-content, 1fr) minmax(0, auto) minmax(max-content, 1fr); align-items: center; gap: 8px; min-width: 0; }
+.toolbar { --seg-h: 44px; display: grid; grid-template-columns: minmax(max-content, 1fr) minmax(0, auto) minmax(max-content, 1fr); align-items: center; gap: 8px; min-width: 0; }
 .history, .zoom, .colorBar {
   display: flex; align-items: stretch; height: var(--seg-h); box-sizing: border-box;
   border: 1px solid var(--line); border-radius: var(--r-sm); background: #fff; overflow: hidden;
@@ -135,7 +135,8 @@
 /* сколько штук этого цвета в заявке */
 .swatch, .swatchActive { position: relative; }
 .swatchCount {
-  position: absolute; top: -6px; right: -7px; min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box;
+  /* значок количества не выходит за рамку панели: сверху до неё остаётся зазор */
+  position: absolute; top: -4px; right: -8px; min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box;
   border-radius: 8px; background: var(--lime); color: var(--ink); box-shadow: 0 0 0 1px var(--ink);
   font-size: 9px; font-weight: 800; line-height: 15px; text-align: center; pointer-events: none;
 }

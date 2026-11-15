@@ -14,6 +14,7 @@ import { calcPrice, priceVariants } from '../model/pricing';
 import { METHOD_INFO } from '../config/pricing';
 import { validateFile, ACCEPTED_TYPES } from '../model/quality';
 import { canRedo, canUndo, selectGarment, selectVariant, useConstructor, variantQty } from '../model/store';
+import { coverCrop, maskAspect, refitSlot } from '../model/slot';
 import { contentBox } from '../model/trim';
 import { SIDE_LABEL, SIDE_TAB } from '../model/types';
 import type { DesignStageHandle } from '../canvas/DesignStage';
@@ -205,7 +206,9 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
   }, [draftGate, st.garmentId, st.variantId, st.side, st.method, st.quantities, st.layers]);
 
   // Шрифты текстовых слоёв: грузим по мере появления, после загрузки пересчитываем габарит.
-  const fontKey = st.layers.flatMap((l) => (l.kind === 'text' ? [`${l.fontFamily}|${l.bold}|${l.italic}|${l.text}`] : [])).join('\n');
+  const fontKey = st.layers.flatMap((l) => (l.kind === 'text'
+    ? [`${l.fontFamily}|${l.bold}|${l.italic}|${l.text}`]
+    : l.mask?.kind === 'text' ? [`${l.mask.fontFamily}|${l.mask.bold}|false|${l.mask.text}`] : [])).join('\n');
   useEffect(() => {
     for (const line of fontKey ? fontKey.split('\n') : []) {
       const [family, bold, italic, ...text] = line.split('|');
@@ -228,6 +231,13 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
   // Место под фото из готового принта, в которое встанет следующий выбранный файл.
   const replaceId = useRef<string | null>(null);
   const pickPhotoFor = (id: string) => { replaceId.current = id; fileRef.current?.click(); };
+  /** Новое слово для фото в буквах: окно под фото меняет пропорции вместе со словом. */
+  const setMaskText = (id: string, text: string) => {
+    const l = st.layers.find((x) => x.id === id);
+    if (l?.kind !== 'image' || l.mask?.kind !== 'text') return;
+    const mask = { ...l.mask, text };
+    st.updateLayer(id, { mask, ...refitSlot(l, maskAspect(mask)) }, 'merge');
+  };
   const pickFile = () => { replaceId.current = null; fileRef.current?.click(); };
 
   const onFile = (f?: File) => {
@@ -245,11 +255,10 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
       if (slot?.kind === 'image' && slot.slot !== undefined) {
         // Фото встаёт в окно шаблона: обрезаем по центру под пропорции окна, положение и размер слоя не меняются.
         const [iw, ih] = [img.naturalWidth || 1000, img.naturalHeight || 1000];
-        const cw = Math.min(iw, ih / slot.slot);
-        const ch = cw * slot.slot;
-        const crop = { x: Math.round((iw - cw) / 2), y: Math.round((ih - ch) / 2), width: Math.round(cw), height: Math.round(ch) };
+        const crop = coverCrop(iw, ih, slot.slot);
         st.updateLayer(slot.id, {
           src: url, fileName: f.name, isVector, naturalWidth: crop.width, naturalHeight: crop.height, crop, placeholder: false,
+          srcSize: { w: iw, h: ih },
         });
         track('image_upload', { w: iw, h: ih, type: f.type, kb: Math.round(f.size / 1024), slot: true });
         return;
@@ -423,7 +432,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
         <section className={s.section} data-section="design">
           <DesignPanel
             stage={stageRef} fileError={fileError} onUpload={pickFile} onAddText={addText}
-            onTemplates={() => setTemplatesOpen(true)} onReplacePhoto={pickPhotoFor}
+            onTemplates={() => setTemplatesOpen(true)} onReplacePhoto={pickPhotoFor} onMaskText={setMaskText}
           />
           {/* Телефон: слои — не отдельная вкладка, а короткий список под кнопками добавления */}
           {narrow && !selected && <LayersPanel embedded hex={hex} open onToggle={() => {}} />}

@@ -77,6 +77,8 @@ export interface TextStyle {
   strokeWidth: number;
   /** Изгиб дугой −100…+100. */
   arc: number;
+  /** Повтор надписи столбиком: сколько раз. */
+  repeat?: number;
 }
 
 /** Что и как рисовать: строка (прямой текст) или одна буква (дуга), точка — базовая линия. */
@@ -112,7 +114,7 @@ const MAX_SWEEP = Math.PI;
  */
 export function measureText(text: string, st: TextStyle, fontPx: number): TextBox {
   const empty: TextBox = { width: 0, height: 0, items: [], centered: false, stroke: 0 };
-  const key = `${st.fontFamily}|${st.bold}|${st.italic}|${st.align}|${st.lineHeight}|${st.strokeWidth}|${st.arc}|${fontPx}|${text}`;
+  const key = `${st.fontFamily}|${st.bold}|${st.italic}|${st.align}|${st.lineHeight}|${st.strokeWidth}|${st.arc}|${st.repeat ?? 1}|${fontPx}|${text}`;
   const hit = textCache.get(key);
   if (hit) return hit;
   if (typeof document === 'undefined') return empty;
@@ -123,7 +125,9 @@ export function measureText(text: string, st: TextStyle, fontPx: number): TextBo
 
   const stroke = st.strokeWidth * fontPx;
   const step = fontPx * st.lineHeight;
-  const rows = text.split('\n').map((t) => ({ t, m: ctx.measureText(t) }));
+  const once = text.split('\n').map((t) => ({ t, m: ctx.measureText(t) }));
+  const times = Math.max(1, Math.min(12, Math.round(st.repeat ?? 1)));
+  const rows = Array.from({ length: times }, () => once).flat();
   const maxAdv = Math.max(0, ...rows.map((r) => r.m.width));
   const arc = Math.max(-100, Math.min(100, st.arc));
 

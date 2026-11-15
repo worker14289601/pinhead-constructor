@@ -1,4 +1,5 @@
-import type { ImageLayer, TextLayer } from '../model/types';
+import { maskAspect } from '../model/slot';
+import type { ImageLayer, ImageMask, TextLayer } from '../model/types';
 import { artAspect, artImage, photoPlaceholder, type ArtColors, type ArtId } from './template-art';
 
 /**
@@ -27,12 +28,15 @@ interface TplText {
   italic?: boolean;
   arc?: number;
   lineHeight?: number;
+  /** Повтор надписи столбиком. */
+  repeat?: number;
   tone?: TemplateTone;
   tilt?: Tilt;
 }
 interface TplArt { kind: 'art'; art: ArtId; x: number; y: number; w: number; tilt?: Tilt }
 /** Место под фото клиента: aspect — высота в долях ширины. */
-interface TplPhoto { kind: 'photo'; x: number; y: number; w: number; aspect: number; tilt?: Tilt }
+/** С маской-словом пропорции окна считаются по буквам, aspect — только ориентир для раскладки. */
+interface TplPhoto { kind: 'photo'; x: number; y: number; w: number; aspect: number; mask?: ImageMask; tilt?: Tilt }
 type TplItem = TplText | TplArt | TplPhoto;
 
 export interface PrintTemplate {
@@ -89,6 +93,7 @@ export function buildTemplate(tpl: PrintTemplate, aspect: number, light: boolean
         kind: 'text', text: it.text, fontFamily: it.font, fontSize: it.size * s, fill: color, align: 'center',
         bold: !!it.bold, italic: !!it.italic, lineHeight: it.lineHeight ?? 1.1, strokeWidth: 0,
         strokeColor: color === '#ffffff' ? '#111111' : '#ffffff', arc: it.arc ?? 0, rotation, ...place(it.cx, it.cy, it.tilt),
+        ...(it.repeat ? { repeat: it.repeat } : null),
       };
     }
     // У картинки точка (x, y) — левый верхний угол, вокруг него она и поворачивается.
@@ -96,9 +101,10 @@ export function buildTemplate(tpl: PrintTemplate, aspect: number, light: boolean
     if (it.kind === 'art') {
       return { kind: 'image', ...artImage(it.art, c), fileName: 'Графика шаблона.svg', isVector: true, width: it.w * s, rotation, ...pos };
     }
+    const aspect = it.mask?.kind === 'text' ? maskAspect(it.mask) : it.aspect;
     return {
-      kind: 'image', ...photoPlaceholder(it.aspect), fileName: 'Место под фото', isVector: true, width: it.w * s, rotation, ...pos,
-      slot: it.aspect, placeholder: true,
+      kind: 'image', ...photoPlaceholder(aspect, !!it.mask), fileName: 'Место под фото', isVector: true, width: it.w * s, rotation, ...pos,
+      slot: aspect, placeholder: true, ...(it.mask ? { mask: it.mask } : null),
     };
   });
 }
@@ -140,6 +146,20 @@ export const TEMPLATES: PrintTemplate[] = [
     ],
   },
   {
+    id: 'photo-letters', title: 'Фото в буквах', category: 'С фото', height: 0.46,
+    items: [
+      { kind: 'photo', x: 0.02, y: 0, w: 0.96, aspect: 0.24, mask: { kind: 'text', text: 'МАМА', fontFamily: 'Rubik Mono One', bold: false } },
+      { kind: 'text', text: 'самая любимая', font: 'Caveat', bold: true, size: 0.1, cx: 0.5, cy: 0.37, tone: 'accent' },
+    ],
+  },
+  {
+    id: 'photo-strips', title: 'Фото-полосы', category: 'С фото', height: 1.14,
+    items: [
+      { kind: 'photo', x: 0.1, y: 0, w: 0.8, aspect: 1.2, mask: { kind: 'strips', count: 5, gap: 0.035 } },
+      { kind: 'text', text: 'лучшие моменты', font: 'Montserrat', bold: true, size: 0.055, cx: 0.5, cy: 1.07 },
+    ],
+  },
+  {
     id: 'poster', title: 'Афиша', category: 'С фото', height: 1.42,
     items: [
       { kind: 'photo', x: 0.08, y: 0, w: 0.84, aspect: 1.15 },
@@ -168,6 +188,14 @@ export const TEMPLATES: PrintTemplate[] = [
       { kind: 'text', text: 'юмор · забота · терпение', font: 'Montserrat', size: 0.042, cx: 0.5, cy: 0.79, tone: 'accent' },
       { kind: 'art', art: 'barcode', x: 0.2, y: 0.93, w: 0.6 },
       { kind: 'text', text: 'не кантовать · беречь', font: 'Montserrat', bold: true, size: 0.034, cx: 0.5, cy: 1.125 },
+    ],
+  },
+  {
+    id: 'patronymic', title: 'Отчество', category: 'Надписи', height: 0.74,
+    items: [
+      { kind: 'text', text: 'АЛЕКСЕЕВИЧ', font: 'Unbounded', bold: true, size: 0.1, cx: 0.5, cy: 0.27, repeat: 5, lineHeight: 1.08 },
+      { kind: 'art', art: 'rule', x: 0.1, y: 0.6, w: 0.8 },
+      { kind: 'text', text: 'сын своего отца · с 1996', font: 'Montserrat', size: 0.045, cx: 0.5, cy: 0.67, tone: 'accent' },
     ],
   },
   {

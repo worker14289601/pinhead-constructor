@@ -8,6 +8,7 @@ import { buildTemplate, TEMPLATE_CATEGORIES, TEMPLATES, type PrintTemplate } fro
 import { ensureFont, onFontLoaded } from '../model/fonts';
 import { selectGarment, useConstructor } from '../model/store';
 import { measureText, textFont } from '../model/trim';
+import { drawMasked } from '../canvas/masked';
 import t from './templates.module.css';
 import { useDismiss } from './useDismiss';
 
@@ -56,7 +57,9 @@ function Preview({ tpl, hex, light, tick }: { tpl: PrintTemplate; hex: string; l
         ctx.rotate((l.rotation * Math.PI) / 180);
         if (l.kind === 'image') {
           const w = l.width * zw;
-          ctx.drawImage(imgs[i]!, 0, 0, w, (w * l.naturalHeight) / l.naturalWidth);
+          const h = (w * l.naturalHeight) / l.naturalWidth;
+          if (l.mask) drawMasked(ctx, imgs[i]!, { x: 0, y: 0, width: l.naturalWidth, height: l.naturalHeight }, w, h, l.mask);
+          else ctx.drawImage(imgs[i]!, 0, 0, w, h);
         } else {
           const fontPx = l.fontSize * zw;
           const box = measureText(l.text, l, fontPx);
@@ -104,7 +107,10 @@ export function TemplatePicker({ hex, onClose }: { hex: string; onClose: () => v
   // Шрифты превью грузим сразу все; после загрузки перерисовываем.
   useEffect(() => {
     const off = onFontLoaded(redraw);
-    for (const tpl of TEMPLATES) for (const it of tpl.items) if (it.kind === 'text') ensureFont(it.font, !!it.bold, !!it.italic, it.text).catch(() => {});
+    for (const tpl of TEMPLATES) for (const it of tpl.items) {
+      if (it.kind === 'text') ensureFont(it.font, !!it.bold, !!it.italic, it.text).catch(() => {});
+      else if (it.kind === 'photo' && it.mask?.kind === 'text') ensureFont(it.mask.fontFamily, it.mask.bold, false, it.mask.text).catch(() => {});
+    }
     return off;
   }, []);
 

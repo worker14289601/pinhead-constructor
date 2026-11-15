@@ -315,3 +315,11 @@
 }
 .slotBtnMain { border-color: var(--ink); background: var(--lime); font-family: var(--font-head); text-transform: uppercase; }
 .slotBtnMain:hover { background: #8aea00; }
+
+/* Слово, по буквам которого обрезано фото */
+.maskField { display: flex; align-items: center; gap: 10px; font-size: var(--fs-sm); font-weight: 700; }
+.maskInput {
+  flex: 1; min-width: 0; min-height: var(--tap); padding: 0 12px; box-sizing: border-box; border: 1px solid var(--line);
+  border-radius: var(--r-sm); background: #fff; font: inherit; font-size: var(--fs-md); font-weight: 700; text-transform: uppercase;
+}
+.maskInput:focus { outline: none; border-color: var(--ink); box-shadow: 0 0 0 3px var(--lime-soft); }

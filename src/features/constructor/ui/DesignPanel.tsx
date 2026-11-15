@@ -19,13 +19,15 @@ interface Props {
   onTemplates?: () => void;
   /** Вставить своё фото в место под фото из готового принта (id слоя). */
   onReplacePhoto?: (id: string) => void;
+  /** Поменять слово, по буквам которого обрезано фото. */
+  onMaskText?: (id: string, text: string) => void;
 }
 
 /**
  * Правая панель «Дизайн» зависит от выбора на холсте:
  * ничего не выбрано — три крупных входа (готовые принты, картинка, текст); текст — настройки текста; картинка — её параметры.
  */
-export function DesignPanel({ stage, fileError, onUpload, onAddText, onTemplates, onReplacePhoto }: Props) {
+export function DesignPanel({ stage, fileError, onUpload, onAddText, onTemplates, onReplacePhoto, onMaskText }: Props) {
   const side = useConstructor((st) => st.side);
   const garment = useConstructor(selectGarment);
   const selected = useConstructor((st) => st.layers.find((l) => l.id === st.selectedLayerId));
@@ -95,6 +97,15 @@ export function DesignPanel({ stage, fileError, onUpload, onAddText, onTemplates
 
           {selected.kind === 'text' && <TextPanel layer={selected} />}
 
+          {selected.kind === 'image' && selected.mask?.kind === 'text' && onMaskText && (
+            <label className={d.maskField}>
+              <span>Слово</span>
+              <input
+                className={d.maskInput} value={selected.mask.text} maxLength={14} autoCapitalize="characters" enterKeyHint="done"
+                onChange={(e) => onMaskText(selected.id, e.target.value.toUpperCase())}
+              />
+            </label>
+          )}
           {selected.kind === 'image' && selected.slot !== undefined && onReplacePhoto && (
             <button type="button" className={selected.placeholder ? d.slotBtnMain : d.slotBtn} onClick={() => onReplacePhoto(selected.id)}>
               <Icon name="upload" size={20} />{selected.placeholder ? 'Вставить своё фото' : 'Заменить фото'}

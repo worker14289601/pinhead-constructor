@@ -3,6 +3,7 @@ import { Image as KImage, Shape } from 'react-konva';
 import useImage from 'use-image';
 import type Konva from 'konva';
 import { measureText, textFont } from '../model/trim';
+import { drawMasked } from './masked';
 import type { DesignLayer } from '../model/types';
 
 interface Props {
@@ -62,10 +63,20 @@ export function LayerNode({ layer, area, onSelect, onChange, onDrag }: Props) {
   };
 
   if (layer.kind === 'image') {
+    const mask = layer.mask;
     return (
       <KImage
         {...common}
-        sceneFunc={layer.flipX ? flippedImage : undefined}
+        sceneFunc={mask ? (ctx, shape) => {
+          const image = (shape as Konva.Image).image() as HTMLImageElement | undefined;
+          if (!image) return;
+          const c = ctx._context;
+          const src = layer.crop ?? { x: 0, y: 0, width: image.naturalWidth, height: image.naturalHeight };
+          c.save();
+          if (layer.flipX) { c.translate(shape.width(), 0); c.scale(-1, 1); }
+          drawMasked(c, image, src, shape.width(), shape.height(), mask);
+          c.restore();
+        } : layer.flipX ? flippedImage : undefined}
         image={img}
         crop={layer.crop}
         width={layer.width * area.w}

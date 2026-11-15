@@ -103,7 +103,17 @@ export interface ImageLayer extends LayerBase {
   slot?: number;
   /** В месте под фото пока стоит заглушка — клиент ещё не вставил свой снимок. */
   placeholder?: boolean;
+  /** Форма, по которой обрезается фото: буквы слова или горизонтальные полосы. Нет — прямоугольник. */
+  mask?: ImageMask;
+  /** Размер исходного снимка в пикселях — чтобы заново обрезать его, когда меняются пропорции окна. */
+  srcSize?: { w: number; h: number };
 }
+
+export type ImageMask =
+  /** Фото видно сквозь буквы слова. */
+  | { kind: 'text'; text: string; fontFamily: string; bold: boolean }
+  /** Фото нарезано на count полос; gap — просвет между ними в долях высоты. */
+  | { kind: 'strips'; count: number; gap: number };
 
 export interface TextLayer extends LayerBase {
   kind: 'text';
@@ -121,6 +131,8 @@ export interface TextLayer extends LayerBase {
   strokeColor: string;
   /** Изгиб дугой −100…+100: 0 — прямой, плюс — горбом вверх, минус — улыбкой. */
   arc: number;
+  /** Сколько раз надпись повторяется столбиком (слово в несколько рядов); нет или 1 — один раз. */
+  repeat?: number;
 }
 
 export type DesignLayer = ImageLayer | TextLayer;

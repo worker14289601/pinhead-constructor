@@ -115,9 +115,11 @@ export function artImage(id: ArtId, c: ArtColors) {
 }
 
 /** Заглушка «место под фото» с заданными пропорциями (высота в долях ширины). */
-export function photoPlaceholder(aspect: number) {
+export function photoPlaceholder(aspect: number, plain = false) {
   const h = 100 * aspect;
   const cy = h / 2;
+  // Для фото, обрезанного по буквам или полосам, — ровная заливка: значок сквозь маску выглядел бы обрывками.
+  if (plain) return wrap(100, h, `<rect width="100" height="${h}" fill="#c4c4c4"/>`);
   const body = `<rect width="100" height="${h}" fill="#bdbdbd"/>`
     + `<circle cx="38" cy="${cy - 9}" r="5.5" fill="#f4f4f4"/>`
     + `<path d="M22 ${cy + 16}l16-18 9 9 9-13 22 22z" fill="#f4f4f4"/>`
