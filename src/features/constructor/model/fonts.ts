@@ -38,8 +38,32 @@ export async function ensureFont(family: string, bold: boolean, italic: boolean,
   if (ready.has(family) && document.fonts.check(fontSpec(family, bold, italic), text || 'Аа')) return;
   registerFamily(family);
   await document.fonts.load(fontSpec(family, bold, italic), text || 'Аа');
-  clearTextCache();
-  listeners.forEach((fn) => fn());
+  const refresh = () => { clearTextCache(); listeners.forEach((fn) => fn()); };
+  refresh();
+  // Safari сообщает о загрузке раньше, чем шрифт начинает работать в canvas: первое измерение выходит
+  // по запасному шрифту и остаётся в кэше, а рисуется текст уже настоящим — надпись съезжает от своей рамки.
+  // Поэтому ждём, пока canvas действительно применит шрифт, и пересчитываем ещё раз.
+  if (canvasUses(family, bold, italic, text || 'Аа')) return;
+  for (let i = 0; i < CANVAS_RETRIES; i++) {
+    await new Promise((r) => setTimeout(r, CANVAS_RETRY_MS));
+    if (canvasUses(family, bold, italic, text || 'Аа')) break;
+  }
+  refresh();
+}
+
+const CANVAS_RETRIES = 12;
+const CANVAS_RETRY_MS = 150;
+let probeCtx: CanvasRenderingContext2D | null | undefined;
+
+/** Применяет ли canvas этот шрифт: ширина текста с ним отличается от ширины запасным шрифтом. */
+function canvasUses(family: string, bold: boolean, italic: boolean, text: string): boolean {
+  if (probeCtx === undefined) probeCtx = document.createElement('canvas').getContext('2d');
+  if (!probeCtx) return true;
+  const style = `${italic ? 'italic' : 'normal'} ${bold ? 700 : 400} 64px`;
+  probeCtx.font = `${style} monospace`;
+  const fallback = probeCtx.measureText(text).width;
+  probeCtx.font = `${style} "${family}", monospace`;
+  return Math.abs(probeCtx.measureText(text).width - fallback) > 0.5;
 }
 
 /** Загружен ли шрифт под этот текст (для проверки перед снимком холста). */
