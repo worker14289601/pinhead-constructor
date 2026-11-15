@@ -14,6 +14,7 @@ type NewImage = Pick<ImageLayer, 'src' | 'fileName' | 'isVector' | 'naturalWidth
 interface Snapshot {
   layers: DesignLayer[];
   selectedLayerId: string | null;
+  selectedGroup?: string | null;
   side: Side;
 }
 
@@ -35,6 +36,8 @@ interface ConstructorState {
   side: Side;
   layers: DesignLayer[];
   selectedLayerId: string | null;
+  /** Выбран готовый принт целиком (группа слоёв); тогда selectedLayerId — null. */
+  selectedGroup: string | null;
   method: PrintMethod;
   /**
    * Количество по размерам для каждого цвета (ключ — productId). Принт один, а размеры у каждого цвета свои:
@@ -59,6 +62,16 @@ interface ConstructorState {
   /** Заменить слои текущей стороны слоями шаблона одним шагом истории; слои других сторон не меняются, выбор снимается. */
   applyTemplate: (layers: Array<Omit<TextLayer, 'id' | 'side'> | Omit<ImageLayer, 'id' | 'side'>>) => void;
   updateLayer: (id: string, patch: Partial<DesignLayer>, mode?: HistoryMode) => void;
+  /** Правка нескольких слоёв одним шагом истории (группа готового принта). */
+  updateLayers: (patches: Record<string, Partial<DesignLayer>>) => void;
+  /** Выбрать готовый принт целиком. */
+  selectGroup: (group: string | null) => void;
+  /** Удалить группу целиком / дублировать её / разъединить на отдельные слои. */
+  removeGroup: (group: string) => void;
+  duplicateGroup: (group: string) => void;
+  ungroup: (group: string) => void;
+  /** Заменить слои группы новыми на месте первого из них (новое слово «снимка в каждой букве»); набор склеивается. */
+  replaceInGroup: (group: string, removeIds: string[], add: Array<Omit<ImageLayer, 'id' | 'side'>>) => void;
   removeLayer: (id: string) => void;
   duplicateLayer: (id: string) => void;
   /** Поднять (+1) или опустить (−1) слой среди слоёв его стороны. */
@@ -79,7 +92,7 @@ interface ConstructorState {
 
 let lastMerge: { key: string; at: number } | null = null;
 
-const snapshot = (s: ConstructorState): Snapshot => ({ layers: s.layers, selectedLayerId: s.selectedLayerId, side: s.side });
+const snapshot = (s: ConstructorState): Snapshot => ({ layers: s.layers, selectedLayerId: s.selectedLayerId, selectedGroup: s.selectedGroup, side: s.side });
 
 /** Запомнить текущий дизайн перед действием; новое действие сбрасывает «повтор». */
 const record = (s: ConstructorState) => {
@@ -103,6 +116,7 @@ export const useConstructor = create<ConstructorState>((set, get) => {
     set({
       layers: target.layers,
       selectedLayerId: target.layers.some((l) => l.id === target.selectedLayerId) ? target.selectedLayerId : null,
+      selectedGroup: target.selectedGroup && target.layers.some((l) => l.group === target.selectedGroup) ? target.selectedGroup : null,
       side,
       [from]: stack.slice(0, -1),
       [to]: [...s[to], current],
@@ -116,6 +130,7 @@ export const useConstructor = create<ConstructorState>((set, get) => {
     side: 'front',
     layers: [],
     selectedLayerId: null,
+    selectedGroup: null,
     method: 'dtf',
     quantities: {},
     past: [],
@@ -139,6 +154,7 @@ export const useConstructor = create<ConstructorState>((set, get) => {
         quantities: d.quantities,
         layers: d.layers,
         selectedLayerId: null,
+        selectedGroup: null,
         past: [],
         future: [],
       });
@@ -155,7 +171,7 @@ export const useConstructor = create<ConstructorState>((set, get) => {
     },
     // Размеры у каждого цвета свои: при смене цвета ничего не переносим, скопировать можно кнопкой (copySizes).
     selectVariant: (variantId) => set({ variantId }),
-    setSide: (side) => set({ side, selectedLayerId: null }),
+    setSide: (side) => set({ side, selectedLayerId: null, selectedGroup: null }),
 
     addImage: (img) => {
       const id = uid();
@@ -176,13 +192,58 @@ export const useConstructor = create<ConstructorState>((set, get) => {
       set((s) => ({ ...record(s), layers: [...s.layers, layer], selectedLayerId: id }));
     },
     applyTemplate: (layers) =>
+      set((s) => {
+        // Несколько слоёв шаблона — одна группа: принт двигается целиком.
+        const group = layers.length > 1 ? uid() : undefined;
+        return {
+          ...record(s),
+          layers: [
+            ...s.layers.filter((l) => l.side !== s.side),
+            ...layers.map((l) => ({ ...l, id: uid(), side: s.side, group }) as DesignLayer),
+          ],
+          selectedLayerId: null,
+          selectedGroup: null,
+        };
+      }),
+    updateLayers: (patches) =>
       set((s) => ({
         ...record(s),
-        layers: [
-          ...s.layers.filter((l) => l.side !== s.side),
-          ...layers.map((l) => ({ ...l, id: uid(), side: s.side }) as DesignLayer),
-        ],
-        selectedLayerId: null,
+        layers: s.layers.map((l) => (patches[l.id] ? ({ ...l, ...patches[l.id] } as DesignLayer) : l)),
+      })),
+    selectGroup: (selectedGroup) => set({ selectedGroup, selectedLayerId: null }),
+    removeGroup: (group) =>
+      set((s) => ({ ...record(s), layers: s.layers.filter((l) => l.group !== group), selectedLayerId: null, selectedGroup: null })),
+    duplicateGroup: (group) =>
+      set((s) => {
+        const members = s.layers.filter((l) => l.group === group);
+        if (!members.length) return {};
+        const copyGroup = uid();
+        const copies = members.map((l) => ({ ...l, id: uid(), group: copyGroup, x: l.x + 0.04, y: l.y + 0.04 }) as DesignLayer);
+        // Копия — сразу за последним слоем исходной группы, тоже подряд.
+        let last = -1;
+        s.layers.forEach((l, n) => { if (l.group === group) last = n; });
+        const layers = [...s.layers.slice(0, last + 1), ...copies, ...s.layers.slice(last + 1)];
+        return { ...record(s), layers, selectedLayerId: null, selectedGroup: copyGroup };
+      }),
+    replaceInGroup: (group, removeIds, add) =>
+      set((s) => {
+        const at = s.layers.findIndex((l) => removeIds.includes(l.id));
+        if (at < 0) return {};
+        const key = `${group}:replace`;
+        const now = Date.now();
+        const history = lastMerge?.key === key && now - lastMerge.at < MERGE_MS * 3 ? {} : record(s);
+        lastMerge = { key, at: now };
+        const side = s.layers[at].side;
+        const fresh = add.map((l) => ({ ...l, id: uid(), side, group }) as DesignLayer);
+        const rest = s.layers.filter((l) => !removeIds.includes(l.id));
+        const pos = s.layers.slice(0, at).filter((l) => !removeIds.includes(l.id)).length;
+        return { ...history, layers: [...rest.slice(0, pos), ...fresh, ...rest.slice(pos)], selectedLayerId: null, selectedGroup: group };
+      }),
+    ungroup: (group) =>
+      set((s) => ({
+        ...record(s),
+        layers: s.layers.map((l) => (l.group === group ? ({ ...l, group: undefined } as DesignLayer) : l)),
+        selectedGroup: null,
       })),
     updateLayer: (id, patch, mode = 'commit') =>
       set((s) => {
@@ -201,7 +262,7 @@ export const useConstructor = create<ConstructorState>((set, get) => {
     removeLayer: (id) =>
       set((s) => {
         const layers = s.layers.filter((l) => l.id !== id);
-        return { ...record(s), layers, selectedLayerId: null };
+        return { ...record(s), layers, selectedLayerId: null, selectedGroup: null };
       }),
     duplicateLayer: (id) =>
       set((s) => {
@@ -220,11 +281,24 @@ export const useConstructor = create<ConstructorState>((set, get) => {
         let j = i + dir;
         while (j >= 0 && j < s.layers.length && s.layers[j].side !== s.layers[i].side) j += dir;
         if (j < 0 || j >= s.layers.length) return {};
-        const layers = [...s.layers];
-        [layers[i], layers[j]] = [layers[j], layers[i]];
-        return { ...record(s), layers };
+        const me = s.layers[i];
+        const next = s.layers[j];
+        // Внутри своей группы — обычный обмен местами.
+        if (me.group && next.group === me.group) {
+          const layers = [...s.layers];
+          [layers[i], layers[j]] = [layers[j], layers[i]];
+          return { ...record(s), layers };
+        }
+        // Слой выходит за край группы — он из неё выходит; чужую группу перепрыгивает целиком,
+        // чтобы её слои остались подряд.
+        let k = j;
+        if (next.group) while (s.layers[k + dir]?.group === next.group) k += dir;
+        const moved = (me.group ? { ...me, group: undefined } : me) as DesignLayer;
+        const rest = s.layers.filter((_, n) => n !== i);
+        const at = rest.indexOf(s.layers[k]) + (dir > 0 ? 1 : 0);
+        return { ...record(s), layers: [...rest.slice(0, at), moved, ...rest.slice(at)] };
       }),
-    selectLayer: (selectedLayerId) => set({ selectedLayerId }),
+    selectLayer: (selectedLayerId) => set({ selectedLayerId, selectedGroup: null }),
     undo: () => travel('past'),
     redo: () => travel('future'),
 

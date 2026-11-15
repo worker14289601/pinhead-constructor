@@ -12,13 +12,15 @@ import { clearDraft, hasContent, loadDraft, saveDraft, type Draft } from '../mod
 import { ensureFont, onFontLoaded } from '../model/fonts';
 import { calcPrice, priceVariants } from '../model/pricing';
 import { METHOD_INFO } from '../config/pricing';
-import { validateFile, ACCEPTED_TYPES } from '../model/quality';
+import { validateFile, ACCEPTED_TYPES, MIN_DPI } from '../model/quality';
 import { canRedo, canUndo, selectGarment, selectVariant, useConstructor, variantQty } from '../model/store';
 import { PHOTO_SHAPE } from '../config/photo-shapes';
+import { maskOverlay } from '../canvas/masked';
 import { applyCrop, applyShape, areaAspect } from '../model/crop';
-import { coverCrop, maskAspect, refitSlot } from '../model/slot';
+import { coverCrop, isLetterSlot, letterBoxes, maskAspect, refitSlot } from '../model/slot';
+import { letterSlots } from '../config/templates';
 import { contentBox } from '../model/trim';
-import { SIDE_LABEL, SIDE_TAB, type PhotoShape } from '../model/types';
+import { SIDE_LABEL, SIDE_TAB, type ImageLayer, type PhotoShape } from '../model/types';
 import type { DesignStageHandle } from '../canvas/DesignStage';
 import { MAX_USER_ZOOM, ZOOM_STEP } from '../canvas/zoom';
 import { GarmentPicker } from './GarmentPicker';
@@ -104,8 +106,8 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
 
   // На телефоне выбор принта на холсте открывает его настройки (шаг «Принт») — с любого шага.
   useEffect(() => {
-    if (st.selectedLayerId) setTab('design');
-  }, [st.selectedLayerId]);
+    if (st.selectedLayerId || st.selectedGroup) setTab('design');
+  }, [st.selectedLayerId, st.selectedGroup]);
   // Развёрнутый лист — только пока нужен: при смене шага возвращаем обычную высоту.
   useEffect(() => setSheetFull(false), [tab]);
 
@@ -113,7 +115,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
   const appRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     appRef.current?.querySelectorAll<HTMLElement>('[data-section]').forEach((el) => { el.scrollTop = 0; });
-  }, [tab, st.selectedLayerId]);
+  }, [tab, st.selectedLayerId, st.selectedGroup]);
 
   // Телефонная раскладка: при редактировании слоя холст приближается к зоне печати.
   const [narrow, setNarrow] = useState(false);
@@ -156,7 +158,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
     if (orderOpen || templatesOpen || cropId) return;
     const onKey = (e: KeyboardEvent) => {
       // Esc — «Готово»: закрыть настройки слоя, даже из поля ввода (пока не открыта таблица размеров).
-      if (e.key === 'Escape' && !chartOpen && useConstructor.getState().selectedLayerId) {
+      if (e.key === 'Escape' && !chartOpen && (useConstructor.getState().selectedLayerId || useConstructor.getState().selectedGroup)) {
         (document.activeElement as HTMLElement | null)?.blur?.();
         useConstructor.getState().selectLayer(null);
         return;
@@ -172,9 +174,10 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
       } else if (mod && (key === 'y' || e.code === 'KeyY')) {
         e.preventDefault();
         st.redo();
-      } else if ((e.key === 'Delete' || e.key === 'Backspace') && st.selectedLayerId) {
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && (st.selectedLayerId || st.selectedGroup)) {
         e.preventDefault();
-        st.removeLayer(st.selectedLayerId);
+        if (st.selectedLayerId) st.removeLayer(st.selectedLayerId);
+        else if (st.selectedGroup) st.removeGroup(st.selectedGroup);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -243,6 +246,34 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
     const mask = { ...l.mask, text };
     st.updateLayer(id, { mask, ...refitSlot(l, maskAspect(mask)) }, 'merge');
   };
+  /**
+   * Новое слово у «снимка в каждой букве»: буквы перестраиваются той же высоты и по той же середине,
+   * вставленные снимки остаются на своих местах по порядку (обрезаются под новые буквы).
+   */
+  const setGroupWord = (group: string, word: string) => {
+    const letters = st.layers.filter((l): l is ImageLayer => l.group === group && isLetterSlot(l));
+    const first = letters[0];
+    if (!first || first.mask?.kind !== 'text' || !garment) return;
+    const font = { fontFamily: first.mask.fontFamily, bold: first.mask.bold };
+    const aspect = areaAspect(garment, first);
+    const old = letterBoxes(letters.map((l) => (l.mask as { text: string }).text).join(''), font);
+    const next = letterBoxes(word, font);
+    if (!old.length || !next.length) return;
+    // Ширина зоны на одну «ширину слова» и габарит старого слова (в долях ширины зоны).
+    const unit = first.width / old[0].w;
+    const left = first.x - unit * old[0].x;
+    const top = first.y * aspect - unit * old[0].y;
+    const oldH = unit * Math.max(...old.map((b) => b.y + b.h));
+    // Та же высота букв, но не шире зоны (длинное слово уменьшается) и внутри неё по горизонтали.
+    const newUnit = Math.min(oldH / Math.max(...next.map((b) => b.y + b.h)), 0.96);
+    const newLeft = Math.min(1 - newUnit, Math.max(0, left + unit / 2 - newUnit / 2));
+    const fresh = letterSlots(word, font, newLeft, top, newUnit, aspect).map((l, i) => {
+      const was = letters[i];
+      if (!was || was.placeholder || !was.srcSize) return l;
+      return { ...l, src: was.src, fileName: was.fileName, isVector: was.isVector, srcSize: was.srcSize, placeholder: false, ...refitSlot(was, l.slot!) };
+    });
+    st.replaceInGroup(group, letters.map((l) => l.id), fresh);
+  };
   /** Форма обрезки своего фото; размер снимка берём из самой картинки — у старых слоёв его нет в данных. */
   const setShape = (id: string, shape: PhotoShape | null) => {
     const l = st.layers.find((x) => x.id === id);
@@ -287,11 +318,14 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
       const crop = contentBox(img) ?? undefined;
       const nw = crop?.width ?? (img.naturalWidth || 1000);
       const nh = crop?.height ?? (img.naturalHeight || 1000);
-      // Вписываем в зону печати: 80% ширины, но не выше 80% высоты зоны.
+      // Вписываем в зону печати: 80% ширины, но не выше 80% высоты зоны и не крупнее, чем позволяет
+      // разрешение снимка (MIN_DPI) — чтобы сразу после загрузки не было предупреждения о качестве.
+      // Совсем маленькую картинку всё же ставим заметной (четверть зоны): предупреждение тогда честное.
       const pa = printAreaFor(garment, st.side);
       const areaRatio = pa.height / pa.width; // в единицах кадра: высота/ширина зоны
       const frameRatio = FRAME.h / FRAME.w;
-      const width = Math.min(0.8, (0.8 * areaRatio * frameRatio * nw) / nh);
+      const sharp = isVector ? Infinity : (nw / MIN_DPI) * 2.54 / pa.widthCm;
+      const width = Math.min(0.8, (0.8 * areaRatio * frameRatio * nw) / nh, Math.max(0.25, sharp));
       st.addImage({ src: url, fileName: f.name, isVector, naturalWidth: nw, naturalHeight: nh, crop, width });
       track('image_upload', { w: nw, h: nh, type: f.type, kb: Math.round(f.size / 1024), trimmed: !!crop });
     };
@@ -307,6 +341,10 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
   const cropTarget = st.layers.find((l) => l.id === cropId);
   const cropLayer = cropTarget?.kind === 'image' ? cropTarget : undefined;
   const cropShape = cropLayer?.mask?.kind === 'shape' ? PHOTO_SHAPE[cropLayer.mask.shape] : undefined;
+  // Буквы и полосы: в окне кадрирования показываем, какая часть снимка в них попадёт.
+  const cropMask = cropLayer?.mask && cropLayer.mask.kind !== 'shape' ? cropLayer.mask : undefined;
+  const cropAspect = cropLayer ? (cropLayer.slot ?? cropLayer.naturalHeight / cropLayer.naturalWidth) : 1;
+  const cropOverlay = useMemo(() => (cropMask ? maskOverlay(cropMask, cropAspect) ?? undefined : undefined), [cropMask, cropAspect]);
 
   // «Готово» из строки-сводки: снимаем выбор и показываем раздел целиком.
   const layersRef = useRef<HTMLElement>(null);
@@ -337,7 +375,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
 
   return (
     <div
-      ref={appRef} className={s.app} data-tab={tab} data-editing={selected ? '' : undefined} data-kb={kb ? '' : undefined}
+      ref={appRef} className={s.app} data-tab={tab} data-editing={selected || st.selectedGroup ? '' : undefined} data-kb={kb ? '' : undefined}
       data-sheet={sheetFull ? 'full' : undefined}
     >
       {/* Изделие */}
@@ -451,16 +489,16 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
         onClick={(e) => { if (e.detail === 0) setSheetFull((v) => !v); }}
       />
 
-      <aside className={`${s.panel} ${s.right}`} data-editing={selected ? '' : undefined}>
+      <aside className={`${s.panel} ${s.right}`} data-editing={selected || st.selectedGroup ? '' : undefined}>
         {/* Дизайн: содержимое зависит от выбранного слоя */}
         <section className={s.section} data-section="design">
           <DesignPanel
             stage={stageRef} fileError={fileError} onUpload={pickFile} onAddText={addText}
             onTemplates={() => setTemplatesOpen(true)} onReplacePhoto={pickPhotoFor} onMaskText={setMaskText}
-            onCrop={setCropId} onShape={setShape}
+            onCrop={setCropId} onShape={setShape} onGroupWord={setGroupWord}
           />
           {/* Телефон: слои — не отдельная вкладка, а короткий список под кнопками добавления */}
-          {narrow && !selected && <LayersPanel embedded hex={hex} open onToggle={() => {}} />}
+          {narrow && !selected && !st.selectedGroup && <LayersPanel embedded hex={hex} open onToggle={() => {}} />}
           <input
             ref={fileRef} type="file" hidden accept={ACCEPTED_TYPES.join(',')}
             onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = ''; }}
@@ -503,7 +541,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
       {templatesOpen && <TemplatePicker hex={hex} onClose={() => setTemplatesOpen(false)} />}
       {cropLayer && garment && (
         <CropEditor
-          src={cropLayer.src} flipX={cropLayer.flipX} flipY={cropLayer.flipY} crop={cropLayer.crop} lockedAspect={cropLayer.slot ?? cropShape?.aspect} shape={cropShape}
+          src={cropLayer.src} flipX={cropLayer.flipX} flipY={cropLayer.flipY} crop={cropLayer.crop} lockedAspect={cropLayer.slot ?? cropShape?.aspect} shape={cropShape} overlay={cropOverlay}
           onClose={() => setCropId(null)}
           onApply={(crop, src) => {
             st.updateLayer(cropLayer.id, applyCrop(cropLayer, crop, src, areaAspect(garment, cropLayer)));

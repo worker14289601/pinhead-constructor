@@ -33,11 +33,15 @@ function layerRect(l: DesignLayer, h: number) {
   return { x1: Math.min(...xs), y1: Math.min(...ys), x2: Math.max(...xs), y2: Math.max(...ys) };
 }
 
-/** Размер одного слоя в сантиметрах (с учётом поворота) — для подписи под рамкой выделения. */
-export function layerSizeCm(garment: Garment, layer: DesignLayer): { wCm: number; hCm: number } | null {
-  const pa = printAreaFor(garment, layer.side);
+/** Размер слоя или нескольких слоёв вместе (готовый принт) в сантиметрах — для подписи под рамкой выделения. */
+export function layerSizeCm(garment: Garment, layer: DesignLayer | DesignLayer[]): { wCm: number; hCm: number } | null {
+  const list = Array.isArray(layer) ? layer : [layer];
+  if (!list.length) return null;
+  const pa = printAreaFor(garment, list[0].side);
   const h = (W * pa.height * FRAME.h) / (pa.width * FRAME.w);
-  const r = layerRect(layer, h);
+  const r = list.map((l) => layerRect(l, h)).reduce((a, b) => ({
+    x1: Math.min(a.x1, b.x1), y1: Math.min(a.y1, b.y1), x2: Math.max(a.x2, b.x2), y2: Math.max(a.y2, b.y2),
+  }));
   const cmPerPx = pa.widthCm / W;
   const wCm = (r.x2 - r.x1) * cmPerPx;
   const hCm = (r.y2 - r.y1) * cmPerPx;

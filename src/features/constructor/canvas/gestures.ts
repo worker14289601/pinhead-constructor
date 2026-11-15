@@ -7,9 +7,19 @@ export interface Pt { x: number; y: number }
 
 const deg = (rad: number) => (rad * 180) / Math.PI;
 
+/**
+ * Прямоугольник узла в его собственных осях (до поворота и масштаба). У фото и текста это 0,0,width,height;
+ * у группы готового принта своей ширины нет — берём габарит её слоёв в осях группы.
+ */
+export function localRect(node: Konva.Node): { x: number; y: number; width: number; height: number } {
+  if (node.getType() === 'Group') return node.getClientRect({ relativeTo: node as Konva.Container, skipShadow: true, skipStroke: true });
+  return { x: 0, y: 0, width: node.width(), height: node.height() };
+}
+
 /** Точка середины узла в координатах холста. */
 export function centerOf(node: Konva.Node): Pt {
-  return node.getAbsoluteTransform().point({ x: node.width() / 2, y: node.height() / 2 });
+  const r = localRect(node);
+  return node.getAbsoluteTransform().point({ x: r.x + r.width / 2, y: r.y + r.height / 2 });
 }
 
 /** Сдвигает узел так, чтобы его середина вернулась в точку `center` (после поворота или масштаба). */
@@ -32,7 +42,8 @@ export function snapRotation(r: number): number {
 /** Множитель масштаба, ниже которого принт не сжимается (minPx на экране по меньшей стороне). */
 export function minScale(node: Konva.Node, minPx: number): number {
   const view = node.getAbsoluteScale().x / (node.scaleX() || 1);
-  return minPx / Math.max(1e-6, Math.min(node.width(), node.height()) * view);
+  const r = localRect(node);
+  return minPx / Math.max(1e-6, Math.min(r.width, r.height) * view);
 }
 
 /**

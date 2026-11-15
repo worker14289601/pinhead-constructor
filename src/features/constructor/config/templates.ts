@@ -1,4 +1,4 @@
-import { maskAspect } from '../model/slot';
+import { letterBoxes, maskAspect } from '../model/slot';
 import type { ImageLayer, ImageMask, TextLayer } from '../model/types';
 import { artAspect, artImage, photoPlaceholder, type ArtColors, type ArtId } from './template-art';
 
@@ -37,7 +37,9 @@ interface TplArt { kind: 'art'; art: ArtId; x: number; y: number; w: number; til
 /** Место под фото клиента: aspect — высота в долях ширины. */
 /** С маской-словом пропорции окна считаются по буквам, aspect — только ориентир для раскладки. */
 interface TplPhoto { kind: 'photo'; x: number; y: number; w: number; aspect: number; mask?: ImageMask; tilt?: Tilt }
-type TplItem = TplText | TplArt | TplPhoto;
+/** Слово, в каждой букве которого — своё место под фото (буква — отдельный слой, все вместе — группа принта). */
+interface TplLetters { kind: 'letters'; text: string; font: string; bold?: boolean; x: number; y: number; w: number }
+type TplItem = TplText | TplArt | TplPhoto | TplLetters;
 
 export interface PrintTemplate {
   id: string;
@@ -85,7 +87,8 @@ export function buildTemplate(tpl: PrintTemplate, aspect: number, light: boolean
     return { x: x0 + px * s, y: (y0 + py * s) / aspect };
   };
 
-  return tpl.items.map((it): BuiltLayer => {
+  return tpl.items.flatMap((it): BuiltLayer | BuiltLayer[] => {
+    if (it.kind === 'letters') return letterSlots(it.text, { fontFamily: it.font, bold: !!it.bold }, place(it.x, it.y).x, place(it.x, it.y).y * aspect, it.w * s, aspect);
     const rotation = it.tilt?.deg ?? 0;
     if (it.kind === 'text') {
       const color = fill(it.tone ?? 'main', c);
@@ -101,10 +104,10 @@ export function buildTemplate(tpl: PrintTemplate, aspect: number, light: boolean
     if (it.kind === 'art') {
       return { kind: 'image', ...artImage(it.art, c), fileName: 'Графика шаблона.svg', isVector: true, width: it.w * s, rotation, ...pos };
     }
-    const aspect = it.mask?.kind === 'text' ? maskAspect(it.mask) : it.aspect;
+    const slotAspect = it.mask?.kind === 'text' ? maskAspect(it.mask) : it.aspect;
     return {
-      kind: 'image', ...photoPlaceholder(aspect, !!it.mask), fileName: 'Место под фото', isVector: true, width: it.w * s, rotation, ...pos,
-      slot: aspect, placeholder: true, ...(it.mask ? { mask: it.mask } : null),
+      kind: 'image', ...photoPlaceholder(slotAspect, !!it.mask), fileName: 'Место под фото', isVector: true, width: it.w * s, rotation, ...pos,
+      slot: slotAspect, placeholder: true, ...(it.mask ? { mask: it.mask } : null),
     };
   });
 }
@@ -149,6 +152,13 @@ export const TEMPLATES: PrintTemplate[] = [
     id: 'photo-letters', title: 'Фото в буквах', category: 'С фото', height: 0.46,
     items: [
       { kind: 'photo', x: 0.02, y: 0, w: 0.96, aspect: 0.24, mask: { kind: 'text', text: 'МАМА', fontFamily: 'Rubik Mono One', bold: false } },
+      { kind: 'text', text: 'самая любимая', font: 'Caveat', bold: true, size: 0.1, cx: 0.5, cy: 0.37, tone: 'accent' },
+    ],
+  },
+  {
+    id: 'photo-each-letter', title: 'Снимок в каждой букве', category: 'С фото', height: 0.46,
+    items: [
+      { kind: 'letters', text: 'МАМА', font: 'Rubik Mono One', x: 0.02, y: 0, w: 0.96 },
       { kind: 'text', text: 'самая любимая', font: 'Caveat', bold: true, size: 0.1, cx: 0.5, cy: 0.37, tone: 'accent' },
     ],
   },
@@ -264,3 +274,20 @@ export const TEMPLATES: PrintTemplate[] = [
     ],
   },
 ];
+
+/**
+ * Места под фото по буквам слова. x, y — левый верхний угол слова, w — его ширина, всё в долях ШИРИНЫ зоны
+ * (y переводится в доли высоты через aspect зоны). Каждая буква — фото с маской из одной буквы.
+ */
+export function letterSlots(
+  text: string, font: { fontFamily: string; bold: boolean }, x: number, y: number, w: number, aspect: number,
+): Array<Omit<ImageLayer, 'id' | 'side'>> {
+  return letterBoxes(text, font).map((b) => {
+    const mask: ImageMask = { kind: 'text', text: b.ch, fontFamily: font.fontFamily, bold: font.bold };
+    const slot = maskAspect(mask);
+    return {
+      kind: 'image', ...photoPlaceholder(slot, true), fileName: 'Место под фото', isVector: true,
+      width: w * b.w, rotation: 0, x: x + w * b.x, y: (y + w * b.y) / aspect, slot, placeholder: true, mask,
+    };
+  });
+}

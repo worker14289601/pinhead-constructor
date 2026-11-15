@@ -110,6 +110,7 @@ export function TemplatePicker({ hex, onClose }: { hex: string; onClose: () => v
     for (const tpl of TEMPLATES) for (const it of tpl.items) {
       if (it.kind === 'text') ensureFont(it.font, !!it.bold, !!it.italic, it.text).catch(() => {});
       else if (it.kind === 'photo' && it.mask?.kind === 'text') ensureFont(it.mask.fontFamily, it.mask.bold, false, it.mask.text).catch(() => {});
+      else if (it.kind === 'letters') ensureFont(it.font, !!it.bold, false, it.text).catch(() => {});
     }
     return off;
   }, []);

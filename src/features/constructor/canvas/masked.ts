@@ -68,3 +68,27 @@ export function drawMasked(c: CanvasRenderingContext2D, img: CanvasImageSource, 
   b.globalCompositeOperation = 'source-over';
   c.drawImage(buffer, 0, 0, bw, bh, 0, 0, w, h);
 }
+
+/**
+ * Притенение для окна кадрирования: тёмная плашка с «дырками» по маске (буквы, полосы) в пропорциях окна
+ * aspect (высота / ширина). Видно, какая часть снимка попадёт в буквы. null — нарисовать не вышло.
+ */
+export function maskOverlay(mask: ImageMask, aspect: number): string | null {
+  const w = 600;
+  const h = Math.max(1, Math.round(w * aspect));
+  const out = document.createElement('canvas');
+  out.width = w;
+  out.height = h;
+  const solid = document.createElement('canvas');
+  solid.width = solid.height = 1;
+  const s = solid.getContext('2d');
+  const c = out.getContext('2d');
+  if (!s || !c) return null;
+  s.fillStyle = '#fff';
+  s.fillRect(0, 0, 1, 1);
+  c.fillStyle = 'rgb(0 0 0 / .45)';
+  c.fillRect(0, 0, w, h);
+  c.globalCompositeOperation = 'destination-out';
+  drawMasked(c, solid, { x: 0, y: 0, width: 1, height: 1 }, w, h, mask);
+  return out.toDataURL('image/png');
+}

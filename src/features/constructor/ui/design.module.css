@@ -323,3 +323,8 @@
   border-radius: var(--r-sm); background: #fff; font: inherit; font-size: var(--fs-md); font-weight: 700; text-transform: uppercase;
 }
 .maskInput:focus { outline: none; border-color: var(--ink); box-shadow: 0 0 0 3px var(--lime-soft); }
+
+/* Слои готового принта: выбрать один для правки */
+.groupList { display: flex; flex-direction: column; gap: 6px; }
+.groupList .slotBtn { justify-content: flex-start; font-weight: 600; }
+.groupItem { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

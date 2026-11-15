@@ -14,6 +14,7 @@ import { selectGarment, selectVariant, useConstructor } from '../model/store';
 import { isSleeve, type DesignLayer, type Side } from '../model/types';
 import { alignLayer, snapToCenter, type AlignMode } from './align';
 import { DESIGN_NODE, LayerNode } from './LayerNode';
+import { commitGroup, DESIGN_GROUP, GROUP_ID, runs } from './group';
 import { SelectionControls } from './SelectionControls';
 import { startPinch, type Pt } from './gestures';
 import c from './controls.module.css';
@@ -99,7 +100,9 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = fal
   const touches = useRef(new Map<number, Pt>());
   const pinch = useRef<{ update: (a: Pt, b: Pt) => void; ids: [number, number]; id: string } | null>(null);
   const pinchBusy = useRef(false);
-  const pinchCtx = useRef<{ area: { w: number; h: number } | null; layer: DesignLayer | undefined }>({ area: null, layer: undefined });
+  const pinchCtx = useRef<{ area: { w: number; h: number } | null; layer: DesignLayer | undefined; group: string | null; members: DesignLayer[] }>({ area: null, layer: undefined, group: null, members: [] });
+  // Перетаскивание узлов до жеста двумя пальцами — после жеста возвращаем как было (у слоёв группы оно выключено).
+  const dragState = useRef(new Map<Konva.Node, boolean>());
   // size — кадр изделия (пропорции 400×460), box — весь холст: на телефоне он шире кадра,
   // и в приближении изделие заполняет всю ширину, а не обрезается по краям кадра.
   const [size, setSize] = useState({ w: 400, h: 460 });
@@ -133,6 +136,9 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = fal
   const garmentId = garment?.id;
   const variant = useConstructor(selectVariant);
   const { method, side, layers, selectedLayerId, selectLayer, updateLayer, removeLayer, duplicateLayer } = useConstructor();
+  const { selectedGroup, selectGroup, updateLayers, removeGroup, duplicateGroup } = useConstructor();
+  // Было ли принт-группа уже выбрана до этого нажатия: второе нажатие по её слою выбирает сам слой.
+  const groupWasSelected = useRef(false);
 
   const shape = garment?.shapeId ? SHAPES[garment.shapeId] : null;
   const hex = variant?.hex ?? '#e4e4e4';
@@ -347,17 +353,23 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = fal
 
   // Подпись под выделенным принтом: «26 × 5 см · A4».
   const selectedLayer = sideLayers.find((l) => l.id === selectedLayerId);
+  // Группы готовых принтов на этой стороне: в группе должно остаться хотя бы два слоя.
+  const groupSize = new Map<string, number>();
+  for (const l of sideLayers) if (l.group) groupSize.set(l.group, (groupSize.get(l.group) ?? 0) + 1);
+  const groupOf = (l: DesignLayer) => (l.group && (groupSize.get(l.group) ?? 0) > 1 ? l.group : undefined);
+  const activeGroup = selectedGroup && (groupSize.get(selectedGroup) ?? 0) > 1 ? selectedGroup : null;
+  const groupMembers = activeGroup ? sideLayers.filter((l) => l.group === activeGroup) : [];
   const fmt = (n: number) => (Math.round(n * 10) / 10).toLocaleString('ru-RU');
   let caption: string | undefined;
-  if (garment && selectedLayer) {
-    const sz = layerSizeCm(garment, selectedLayer);
+  if (garment && (selectedLayer || groupMembers.length)) {
+    const sz = layerSizeCm(garment, selectedLayer ?? groupMembers);
     if (sz) {
       const { format, oversize } = formatFor(sz.wCm, sz.hCm, priceListFor(method));
       caption = `${fmt(sz.wCm)} × ${fmt(sz.hCm)} см · ${oversize ? `больше ${format.name}` : format.name}`;
     }
   }
 
-  pinchCtx.current = { area: area ? { w: area.w, h: area.h } : null, layer: selectedLayer };
+  pinchCtx.current = { area: area ? { w: area.w, h: area.h } : null, layer: selectedLayer, group: activeGroup, members: groupMembers };
 
   // Размер зоны печати в см для плашки: до 10 см — с десятыми, дальше — целые.
   const zoneFmt = (n: number) => (n < 10 ? fmt(n) : String(Math.round(n)));
@@ -533,8 +545,12 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = fal
     const finish = () => {
       const g = pinch.current;
       pinch.current = null;
-      const { area: a, layer } = pinchCtx.current;
+      const { area: a, layer, group, members } = pinchCtx.current;
       const node = g ? nodeOf(g.id) : null;
+      if (g && node && a && group && g.id === `${GROUP_ID}${group}`) {
+        useConstructor.getState().updateLayers(commitGroup(node, members, a));
+        return;
+      }
       if (!g || !node || !a || !layer || layer.id !== g.id) return;
       const sx = node.scaleX();
       node.scale({ x: 1, y: 1 });
@@ -548,21 +564,26 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = fal
       // Перетаскивание возвращаем, когда подняты все пальцы, — оставшийся палец не должен утащить слой.
       if (touches.current.size > 0) return;
       pinchBusy.current = false;
-      for (const l of stageRef.current?.find(`.${DESIGN_NODE}`) ?? []) l.draggable(true);
+      for (const [n, on] of dragState.current) n.draggable(on);
+      dragState.current.clear();
     };
     const down = (e: PointerEvent) => {
       if (e.pointerType !== 'touch') return;
       touches.current.set(e.pointerId, local(e));
-      const { layer } = pinchCtx.current;
-      if (touches.current.size !== 2 || pinch.current || !layer) return;
-      const node = nodeOf(layer.id);
+      const { layer, group } = pinchCtx.current;
+      if (touches.current.size !== 2 || pinch.current || (!layer && !group)) return;
+      const targetId = group ? `${GROUP_ID}${group}` : layer!.id;
+      const node = nodeOf(targetId);
       if (!node || !node.isVisible()) return;
       const ids = [...touches.current.keys()] as [number, number];
       pinchBusy.current = true;
       // Первый палец мог начать перетаскивание слоя — гасим его (draggable(false) останавливает drag).
-      for (const l of stageRef.current?.find(`.${DESIGN_NODE}`) ?? []) l.draggable(false);
+      for (const l of stageRef.current?.find(`.${DESIGN_NODE}, .${DESIGN_GROUP}`) ?? []) {
+        if (!dragState.current.has(l)) dragState.current.set(l, l.draggable());
+        l.draggable(false);
+      }
       guideOff();
-      pinch.current = { ids, id: layer.id, update: startPinch(node, touches.current.get(ids[0])!, touches.current.get(ids[1])!, MIN_NODE_PX) };
+      pinch.current = { ids, id: targetId, update: startPinch(node, touches.current.get(ids[0])!, touches.current.get(ids[1])!, MIN_NODE_PX) };
     };
     const guideOff = () => setGuides((p) => (p.v || p.h ? { v: false, h: false } : p));
     const move = (e: PointerEvent) => {
@@ -605,7 +626,8 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = fal
   useEffect(() => {
     const tr = trRef.current;
     if (!tr) return;
-    const node = selectedLayerId ? stageRef.current?.findOne(`#${selectedLayerId}`) : null;
+    const target = selectedLayerId ?? (activeGroup ? `${GROUP_ID}${activeGroup}` : null);
+    const node = target ? stageRef.current?.findOne(`#${target}`) : null;
     tr.nodes(node ? [node] : []);
     tr.getLayer()?.batchDraw();
   });
@@ -698,6 +720,17 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = fal
     align: (id, mode) => {
       const g = printRef.current;
       const node = g?.findOne(`#${id}`);
+      if (g && node && area && id.startsWith(GROUP_ID)) {
+        // Готовый принт целиком: масштаб и сдвиг узла группы, затем перенос в слои одним шагом.
+        const rect = node.getClientRect({ relativeTo: g, skipShadow: true, skipStroke: true });
+        if (!rect.width || !rect.height) return;
+        const r = alignLayer(mode, { x: node.x(), y: node.y() }, rect, { w: area.w, h: area.h });
+        node.scale({ x: node.scaleX() * r.scale, y: node.scaleY() * r.scale });
+        node.position({ x: r.x, y: r.y });
+        const gid = id.slice(GROUP_ID.length);
+        updateLayers(commitGroup(node, layers.filter((l) => l.group === gid && l.side === side), { w: area.w, h: area.h }));
+        return;
+      }
       const layer = layers.find((l) => l.id === id);
       if (!g || !node || !layer || !area) return;
       const rect = node.getClientRect({ relativeTo: g, skipShadow: true, skipStroke: true });
@@ -778,16 +811,49 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = fal
               ref={printRef} x={area.x} y={area.y}
               {...(hasOutline ? { clipFunc: clipOutline } : { clipX: 0, clipY: 0, clipWidth: area.w, clipHeight: area.h })}
             >
-              {sideLayers.map((l) => (
-                <LayerNode
-                  key={l.id}
-                  layer={l}
-                  area={{ w: area.w, h: area.h }}
-                  onSelect={() => selectLayer(l.id)}
-                  onChange={(p) => { if (!pinchBusy.current) updateLayer(l.id, p); }}
-                  onDrag={onDrag}
-                />
-              ))}
+              {runs(sideLayers, groupOf).map((run) => {
+                const nodes = run.layers.map((l) => {
+                  // Слой готового принта: пока принт не «открыт» (выбран один из его слоёв), нажатие выбирает
+                  // принт целиком, а тащится группа; повторное нажатие без перетаскивания выбирает сам слой.
+                  const inside = !run.group || selectedLayer?.group === run.group;
+                  return (
+                    <LayerNode
+                      key={l.id}
+                      layer={l}
+                      area={{ w: area.w, h: area.h }}
+                      draggable={inside}
+                      onSelect={() => {
+                        if (inside) return selectLayer(l.id);
+                        groupWasSelected.current = useConstructor.getState().selectedGroup === run.group;
+                        selectGroup(run.group!);
+                      }}
+                      onTap={inside ? undefined : () => { if (groupWasSelected.current) selectLayer(l.id); }}
+                      onChange={(p) => { if (!pinchBusy.current) updateLayer(l.id, p); }}
+                      onDrag={onDrag}
+                    />
+                  );
+                });
+                if (!run.group) return nodes;
+                const gid = run.group;
+                return (
+                  <Group
+                    key={`${GROUP_ID}${gid}`}
+                    id={`${GROUP_ID}${gid}`}
+                    name={DESIGN_GROUP}
+                    draggable={selectedLayer?.group !== gid}
+                    onDragMove={(e) => { if (e.target === e.currentTarget) onDrag(e.target); }}
+                    onDragEnd={(e) => {
+                      // Сюда же всплывает конец перетаскивания отдельного слоя — его пишет сам слой.
+                      if (e.target !== e.currentTarget) return;
+                      onDrag(null);
+                      if (pinchBusy.current) return;
+                      updateLayers(commitGroup(e.target, run.layers, { w: area.w, h: area.h }));
+                    }}
+                  >
+                    {nodes}
+                  </Group>
+                );
+              })}
               {mockup && sideLayers.length > 0 && (
                 <KImage
                   ref={shadeRef}
@@ -852,9 +918,11 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = fal
           accent={accent}
           caption={caption}
           onCommit={(p) => selectedLayerId && updateLayer(selectedLayerId, p)}
-          onRemove={() => selectedLayerId && removeLayer(selectedLayerId)}
-          onDuplicate={() => selectedLayerId && duplicateLayer(selectedLayerId)}
+          onRemove={() => (selectedLayerId ? removeLayer(selectedLayerId) : activeGroup && removeGroup(activeGroup))}
+          onDuplicate={() => (selectedLayerId ? duplicateLayer(selectedLayerId) : activeGroup && duplicateGroup(activeGroup))}
           onCrop={onCrop && selectedLayer?.kind === 'image' && !selectedLayer.placeholder ? () => onCrop(selectedLayer.id) : undefined}
+          group={!selectedLayer && activeGroup ? activeGroup : undefined}
+          onCommitGroup={(node) => activeGroup && updateLayers(commitGroup(node, groupMembers, { w: area.w, h: area.h }))}
         />
       )}
       </div>

@@ -11,6 +11,10 @@ interface Props {
   /** Размер зоны печати в пикселях экрана. */
   area: { w: number; h: number };
   onSelect: () => void;
+  /** Нажатие без перетаскивания (клик / тап). */
+  onTap?: () => void;
+  /** Слой в группе готового принта, пока выбран принт целиком, сам не перетаскивается — тащится группа. */
+  draggable?: boolean;
   onChange: (patch: Partial<DesignLayer>) => void;
   /** Узел во время перетаскивания (для прилипания к центру); null — перетаскивание закончилось. */
   onDrag?: (node: Konva.Node | null) => void;
@@ -39,7 +43,7 @@ function flippedImage(ctx: Konva.Context, shape: Konva.Shape) {
 }
 
 /** Слой дизайна. Координаты хранятся в долях зоны печати, на экране — пиксели. */
-export function LayerNode({ layer, area, onSelect, onChange, onDrag }: Props) {
+export function LayerNode({ layer, area, onSelect, onTap, draggable = true, onChange, onDrag }: Props) {
   const [img] = useImage(layer.kind === 'image' ? layer.src : '', 'anonymous');
 
   const common = {
@@ -48,9 +52,11 @@ export function LayerNode({ layer, area, onSelect, onChange, onDrag }: Props) {
     x: layer.x * area.w,
     y: layer.y * area.h,
     rotation: layer.rotation,
-    draggable: true,
+    draggable,
     onMouseDown: onSelect,
     onTouchStart: onSelect,
+    onClick: onTap,
+    onTap,
     onDragMove: (e: Konva.KonvaEventObject<DragEvent>) => onDrag?.(e.target),
     onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => {
       onDrag?.(null);

@@ -3,7 +3,9 @@ import { useEffect, useLayoutEffect, useReducer, useRef, useState, type PointerE
 import type Konva from 'konva';
 import type { DesignLayer } from '../model/types';
 import c from './controls.module.css';
-import { centerOf, keepCenter, minScale, snapRotation, type Pt } from './gestures';
+import { centerOf, keepCenter, localRect, minScale, snapRotation, type Pt } from './gestures';
+import { DESIGN_NODE } from './LayerNode';
+import { GROUP_ID } from './group';
 
 /**
  * Кнопки выбранного слоя поверх холста: поворот (сверху, на «ножке»), размер (правый нижний угол),
@@ -20,6 +22,8 @@ const BTN = 32;
 const STEM = COARSE ? 44 : 48;
 /** Угловые кнопки вынесены наружу на столько по каждой оси — не закрывают принт и не налезают друг на друга. */
 const OUT = BTN / 2 + 2;
+/** Половина размера подписи «см · формат» для проверки наложения, px (оценка с запасом). */
+const LABEL_HALF = { w: 62, h: 11 };
 
 interface Props {
   stage: Konva.Stage | null;
@@ -39,6 +43,9 @@ interface Props {
   onDuplicate: () => void;
   /** Кадрировать картинку; без пропа кнопки нет (левый нижний угол). */
   onCrop?: () => void;
+  /** Выбран готовый принт целиком: id группы; тогда layer не задан, а правка уходит в onCommitGroup. */
+  group?: string;
+  onCommitGroup?: (node: Konva.Node) => void;
 }
 
 interface Geo { top: Pt; rotate: Pt; resize: Pt; remove: Pt; duplicate: Pt; crop: Pt; label: Pt }
@@ -51,9 +58,9 @@ const deg = (rad: number) => (rad * 180) / Math.PI;
 
 function geometry(node: Konva.Node, size: { w: number; h: number }): Geo {
   const t = node.getAbsoluteTransform();
-  const w = node.width();
-  const h = node.height();
-  const top = t.point({ x: w / 2, y: 0 });
+  // Прямоугольник узла в его осях: у группы готового принта начало не в нуле.
+  const { x: x0, y: y0, width: w, height: h } = localRect(node);
+  const top = t.point({ x: x0 + w / 2, y: y0 });
   // Смещения считаются в осях принта и поворачиваются вместе с ним.
   const a = (node.getAbsoluteRotation() * Math.PI) / 180;
   const turn = (p: Pt, dx: number, dy: number): Pt => ({
@@ -65,38 +72,50 @@ function geometry(node: Konva.Node, size: { w: number; h: number }): Geo {
     y: Math.min(size.h - BTN / 2, Math.max(BTN / 2, p.y)),
   });
   const box = node.getClientRect({ skipShadow: true, skipStroke: true });
-  const resize = clamp(turn(t.point({ x: w, y: h }), OUT, OUT));
+  const resize = clamp(turn(t.point({ x: x0 + w, y: y0 + h }), OUT, OUT));
   // Бейдж — под кнопкой размера, а не под самим принтом: на узком рукаве он иначе налезал бы на неё.
   const below = Math.max(box.y + box.height + 12, resize.y + BTN / 2 + 8);
+  const rotate = clamp(turn(top, 0, -STEM));
+  const remove = clamp(turn(t.point({ x: x0 + w, y: y0 }), OUT, -OUT));
+  const duplicate = clamp(turn(t.point({ x: x0, y: y0 }), -OUT, -OUT));
+  // Подпись не должна закрывать соседний принт: если снизу она на него ложится, ставим её над кнопками сверху.
+  const lx = Math.min(size.w - 40, Math.max(40, box.x + box.width / 2));
+  const above = Math.min(box.y, rotate.y - BTN / 2, remove.y - BTN / 2, duplicate.y - BTN / 2) - 12;
+  const others = (node.getStage()?.find(`.${DESIGN_NODE}`) ?? []).filter((n) => n !== node && n.isVisible() && !(node.getType() === 'Group' && (node as Konva.Container).isAncestorOf(n)))
+    .map((n) => n.getClientRect({ skipShadow: true, skipStroke: true }));
+  const hits = (y: number) => others.some((r) =>
+    r.x < lx + LABEL_HALF.w && r.x + r.width > lx - LABEL_HALF.w && r.y < y + LABEL_HALF.h && r.y + r.height > y - LABEL_HALF.h);
+  const ly = hits(below) && above >= 14 && !hits(above) ? above : Math.min(size.h - 14, below);
   return {
     top,
-    label: { x: Math.min(size.w - 40, Math.max(40, box.x + box.width / 2)), y: Math.min(size.h - 14, below) },
-    rotate: clamp(turn(top, 0, -STEM)),
+    label: { x: lx, y: ly },
+    rotate,
     resize,
-    remove: clamp(turn(t.point({ x: w, y: 0 }), OUT, -OUT)),
-    duplicate: clamp(turn(t.point({ x: 0, y: 0 }), -OUT, -OUT)),
-    crop: clamp(turn(t.point({ x: 0, y: h }), -OUT, OUT)),
+    remove,
+    duplicate,
+    crop: clamp(turn(t.point({ x: x0, y: y0 + h }), -OUT, OUT)),
   };
 }
 
 const same = (a: Geo | null, b: Geo | null) => JSON.stringify(a) === JSON.stringify(b);
 
-export function SelectionControls({ stage, layer, area, size, minPx, accent, caption, onCommit, onRemove, onDuplicate, onCrop }: Props) {
+export function SelectionControls({ stage, layer, area, size, minPx, accent, caption, onCommit, onRemove, onDuplicate, onCrop, group, onCommitGroup }: Props) {
+  const targetId = group ? `${GROUP_ID}${group}` : layer?.id;
   const [geo, setGeo] = useState<Geo | null>(null);
   const [, bump] = useReducer((n: number) => n + 1, 0);
   const gesture = useRef<Gesture | null>(null);
-  const node = layer && stage ? stage.findOne(`#${layer.id}`) : undefined;
+  const node = targetId && stage ? stage.findOne(`#${targetId}`) : undefined;
 
   // Холст обновляется в эффекте Stage (он выше в дереве) — здесь узел уже на месте.
   // Без списка зависимостей намеренно: узел меняется вне React. Цикла нет — setGeo только при изменении.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useLayoutEffect(() => {
     // Узел ищем заново: новый слой мог появиться на холсте уже после рендера этого компонента.
-    const n = layer && stage ? stage.findOne(`#${layer.id}`) : undefined;
+    const n = targetId && stage ? stage.findOne(`#${targetId}`) : undefined;
     const next = n && n.isVisible() ? geometry(n, size) : null;
     if (!same(next, geo)) setGeo(next);
     // Слой выбран, а узла ещё нет — проверим снова чуть позже.
-    if (layer && !n) {
+    if (targetId && !n) {
       const t = setTimeout(bump, 50);
       return () => clearTimeout(t);
     }
@@ -109,7 +128,7 @@ export function SelectionControls({ stage, layer, area, size, minPx, accent, cap
     return () => { node.off('.controls'); };
   }, [node]);
 
-  if (!layer || !node || !geo) return null;
+  if (!targetId || !node || !geo) return null;
 
   const pointer = (e: ReactPointerEvent): Pt => {
     const r = stage!.container().getBoundingClientRect();
@@ -149,6 +168,8 @@ export function SelectionControls({ stage, layer, area, size, minPx, accent, cap
     const g = gesture.current;
     if (!g) return;
     gesture.current = null;
+    if (group) { onCommitGroup?.(node); return; }
+    if (!layer) return;
     const sx = node.scaleX();
     node.scale({ x: 1, y: 1 });
     const base = { x: node.x() / area.w, y: node.y() / area.h, rotation: node.rotation() };

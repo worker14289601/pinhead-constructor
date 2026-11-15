@@ -41,3 +41,4 @@ npm run dev        # http://localhost:3100/constructor
 `color_select`, `text_add`, `side_switch`, `size_set`, `order_form_open`, `order_send`.
 
 Устройство модуля — `docs/ARCHITECTURE.md`.
+Как менеджеру читать заявку и проверять файл печати — `docs/MANAGER-GUIDE.md`.

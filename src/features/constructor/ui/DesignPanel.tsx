@@ -7,6 +7,15 @@ import { imageDpi, MIN_DPI } from '../model/quality';
 import { selectGarment, useConstructor } from '../model/store';
 import { SIDE_LABEL, SIDE_TAB, type PhotoShape } from '../model/types';
 import { ShapePicker } from './ShapePicker';
+import { GROUP_ID } from '../canvas/group';
+import { isLetterSlot } from '../model/slot';
+import type { DesignLayer } from '../model/types';
+
+/** Подпись слоя в списке готового принта. */
+const memberLabel = (l: DesignLayer) =>
+  l.kind === 'text' ? `«${l.text.replace(/\s+/g, ' ').trim().slice(0, 28) || 'Пустой текст'}»`
+    : isLetterSlot(l) && l.mask?.kind === 'text' ? `Буква «${l.mask.text}»${l.placeholder ? ' — без фото' : ''}`
+    : l.slot !== undefined ? (l.placeholder ? 'Место под фото' : 'Фото') : 'Графика';
 import { Icon, type IconName } from './icons';
 import { TextPanel } from './TextPanel';
 import s from './constructor.module.css';
@@ -27,17 +36,25 @@ interface Props {
   onCrop?: (id: string) => void;
   /** Форма обрезки своего фото; null — без формы. */
   onShape?: (id: string, shape: PhotoShape | null) => void;
+  /** Новое слово у готового принта «снимок в каждой букве» (id группы). */
+  onGroupWord?: (group: string, word: string) => void;
 }
 
 /**
  * Правая панель «Дизайн» зависит от выбора на холсте:
  * ничего не выбрано — три крупных входа (готовые принты, картинка, текст); текст — настройки текста; картинка — её параметры.
  */
-export function DesignPanel({ stage, fileError, onUpload, onAddText, onTemplates, onReplacePhoto, onMaskText, onCrop, onShape }: Props) {
+export function DesignPanel({ stage, fileError, onUpload, onAddText, onTemplates, onReplacePhoto, onMaskText, onCrop, onShape, onGroupWord }: Props) {
   const side = useConstructor((st) => st.side);
   const garment = useConstructor(selectGarment);
   const selected = useConstructor((st) => st.layers.find((l) => l.id === st.selectedLayerId));
-  const { updateLayer, selectLayer } = useConstructor.getState();
+  const { updateLayer, selectLayer, selectGroup, ungroup } = useConstructor.getState();
+  // Выбран готовый принт целиком (группа из нескольких слоёв этой стороны).
+  const groupId = useConstructor((st) => st.selectedGroup);
+  const layersAll = useConstructor((st) => st.layers);
+  const members = groupId ? layersAll.filter((l) => l.group === groupId && l.side === side) : [];
+  const group = !selected && members.length > 1 ? groupId : null;
+  const inGroup = selected?.group && layersAll.filter((l) => l.group === selected.group && l.side === side).length > 1 ? selected.group : null;
 
   const dpi = selected?.kind === 'image' && garment
     ? imageDpi(selected, printAreaFor(garment, selected.side).widthCm, selected.isVector)
@@ -57,7 +74,7 @@ export function DesignPanel({ stage, fileError, onUpload, onAddText, onTemplates
 
   return (
     <>
-      {!selected ? (
+      {!selected && !group ? (
         <>
           <h3 className={s.h}>Принт · {SIDE_LABEL[side]}</h3>
           <div className={d.actions}>
@@ -89,6 +106,65 @@ export function DesignPanel({ stage, fileError, onUpload, onAddText, onTemplates
       ) : null}
       {fileError && <p className={s.err}>{fileError}</p>}
 
+      {group && (
+        <div className={d.body} key={group}>
+          <div className={d.editHead}>
+            <span className={d.chip}>
+              <span className={d.chipIcon}><Icon name="brush" size={18} /></span>
+              Готовый принт
+              <span className={d.chipSide}>· {SIDE_TAB[side]}</span>
+            </span>
+            <button type="button" className={d.doneBtn} onClick={() => selectLayer(null)} title="Готово (Esc)">
+              <Icon name="checkMark" size={18} />Готово
+            </button>
+          </div>
+          {/* Пустое место под фото — главное действие с готовым принтом, без лишнего шага. */}
+          {onReplacePhoto && (() => {
+            const empty = members.find((l) => l.kind === 'image' && l.placeholder);
+            return empty ? (
+              <button type="button" className={d.slotBtnMain} onClick={() => onReplacePhoto(empty.id)}>
+                <Icon name="upload" size={20} />Вставить своё фото
+              </button>
+            ) : null;
+          })()}
+          {onGroupWord && members.some(isLetterSlot) && (
+            <label className={d.maskField}>
+              <span>Слово</span>
+              <input
+                className={d.maskInput} maxLength={10} autoCapitalize="characters" enterKeyHint="done"
+                value={members.filter(isLetterSlot).map((l) => (l.kind === 'image' && l.mask?.kind === 'text' ? l.mask.text : '')).join('')}
+                onChange={(e) => { const w = e.target.value.toUpperCase().replace(/\s+/g, ''); if (w) onGroupWord(group, w); }}
+              />
+            </label>
+          )}
+          <p className={d.note}>Принт двигается, поворачивается и меняет размер целиком. Чтобы поменять текст или фото — нажмите на него ещё раз или выберите здесь:</p>
+          <div className={d.groupList}>
+            {members.map((l) => (
+              <button key={l.id} type="button" className={d.slotBtn} onClick={() => selectLayer(l.id)}>
+                <Icon name={l.kind === 'text' ? 'text' : 'image'} size={18} />
+                <span className={d.groupItem}>{memberLabel(l)}</span>
+              </button>
+            ))}
+          </div>
+          <div className={d.seg} role="group" aria-label="Положение и размер">
+            {([
+              { icon: 'alignCenterX', label: 'По центру по горизонтали', mode: 'centerX' },
+              { icon: 'alignCenterY', label: 'По центру по вертикали', mode: 'centerY' },
+              { icon: 'fit', label: 'Вписать: максимальный размер в зоне печати', mode: 'fit' },
+            ] as const).map((a) => (
+              <button
+                key={a.icon} type="button" className={d.segBtn} title={a.label} aria-label={a.label}
+                onClick={() => stage.current?.align(`${GROUP_ID}${group}`, a.mode)}
+              ><Icon name={a.icon} size={20} /></button>
+            ))}
+            <button
+              type="button" className={d.segBtn} title="Разъединить: двигать слои по отдельности" aria-label="Разъединить"
+              onClick={() => ungroup(group)}
+            ><Icon name="layers" size={20} /></button>
+          </div>
+        </div>
+      )}
+
       {selected && (
         <div className={d.body} key={selected.id}>
           {/* Режим редактирования: шапка закреплена, «Готово» всегда под рукой и возвращает обычный вид панели. */}
@@ -103,6 +179,11 @@ export function DesignPanel({ stage, fileError, onUpload, onAddText, onTemplates
             </button>
           </div>
 
+          {inGroup && (
+            <button type="button" className={d.slotBtn} onClick={() => selectGroup(inGroup)}>
+              <Icon name="brush" size={18} />Весь принт: двигать целиком
+            </button>
+          )}
           {selected.kind === 'text' && <TextPanel layer={selected} />}
 
           {selected.kind === 'image' && selected.mask?.kind === 'text' && onMaskText && (

@@ -19,6 +19,8 @@ export interface CropEditorProps {
   lockedAspect?: number;
   /** Форма обрезки слоя: её контур рисуется в рамке, пропорции задаёт lockedAspect. */
   shape?: { d: string; aspect: number; label: string };
+  /** Готовая картинка притенения по маске (буквы, полосы) — растягивается на рамку. */
+  overlay?: string;
   /** Обрезка в пикселях исходника, без зеркала, целые, внутри картинки. */
   onApply: (crop: CropRect, srcSize: { w: number; h: number }) => void;
   onClose: () => void;
@@ -84,7 +86,7 @@ function refit(cur: R, aspect: number, iw: number, ih: number, min: number): R {
 }
 
 /** Модалка кадрирования фото: рамка поверх целой картинки, остальное затемнено. */
-export function CropEditor({ src, flipX, flipY, crop, lockedAspect, shape, onApply, onClose }: CropEditorProps) {
+export function CropEditor({ src, flipX, flipY, crop, lockedAspect, shape, overlay, onApply, onClose }: CropEditorProps) {
   const { leaving, dismiss } = useDismiss();
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [failed, setFailed] = useState(false);
@@ -258,6 +260,13 @@ export function CropEditor({ src, flipX, flipY, crop, lockedAspect, shape, onApp
               onPointerUp={up}
               onPointerCancel={up}
             >
+              {overlay && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  className={c.shape} src={overlay} alt="" draggable={false}
+                  style={flipX || flipY ? { transform: `scale(${flipX ? -1 : 1}, ${flipY ? -1 : 1})` } : undefined}
+                />
+              )}
               {shape && (
                 // Контур формы: снаружи — притенение, по краю — линия; отражается вместе с фото.
                 <svg
