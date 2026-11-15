@@ -14,6 +14,7 @@ import { calcPrice, priceVariants } from '../model/pricing';
 import { METHOD_INFO } from '../config/pricing';
 import { validateFile, ACCEPTED_TYPES } from '../model/quality';
 import { canRedo, canUndo, selectGarment, selectVariant, useConstructor, variantQty } from '../model/store';
+import { applyCrop, areaAspect } from '../model/crop';
 import { coverCrop, maskAspect, refitSlot } from '../model/slot';
 import { contentBox } from '../model/trim';
 import { SIDE_LABEL, SIDE_TAB } from '../model/types';
@@ -21,6 +22,7 @@ import type { DesignStageHandle } from '../canvas/DesignStage';
 import { MAX_USER_ZOOM, ZOOM_STEP } from '../canvas/zoom';
 import { GarmentPicker } from './GarmentPicker';
 import { Icon } from './icons';
+import { CropEditor } from './CropEditor';
 import { DesignPanel } from './DesignPanel';
 import { DraftPrompt } from './DraftPrompt';
 import { LayersPanel } from './LayersPanel';
@@ -81,6 +83,8 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
   const [chartOpen, setChartOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('garment');
   const [templatesOpen, setTemplatesOpen] = useState(false);
+  /** Слой-картинка, который сейчас кадрируют. */
+  const [cropId, setCropId] = useState<string | null>(null);
   // Лист с настройками на телефоне: обычная высота или развёрнутый (холст при этом ниже).
   const [sheetFull, setSheetFull] = useState(false);
   const gripY = useRef<number | null>(null);
@@ -148,7 +152,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
   // Когда фокус в поле ввода, клавиши остаются полю (там своя отмена набора).
   // Пока открыта форма заявки, клавиши холст не трогают.
   useEffect(() => {
-    if (orderOpen || templatesOpen) return;
+    if (orderOpen || templatesOpen || cropId) return;
     const onKey = (e: KeyboardEvent) => {
       // Esc — «Готово»: закрыть настройки слоя, даже из поля ввода (пока не открыта таблица размеров).
       if (e.key === 'Escape' && !chartOpen && useConstructor.getState().selectedLayerId) {
@@ -174,7 +178,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [orderOpen, chartOpen, templatesOpen]);
+  }, [orderOpen, chartOpen, templatesOpen, cropId]);
 
   // Черновик: при открытии спрашиваем, продолжать ли; пока не ответили — ничего не сохраняем.
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -284,6 +288,8 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
 
   const addText = () => { st.addText(isLight(hex) ? '#111111' : '#ffffff'); track('text_add'); };
   const selected = st.layers.find((l) => l.id === st.selectedLayerId);
+  const cropTarget = st.layers.find((l) => l.id === cropId);
+  const cropLayer = cropTarget?.kind === 'image' ? cropTarget : undefined;
 
   // «Готово» из строки-сводки: снимаем выбор и показываем раздел целиком.
   const layersRef = useRef<HTMLElement>(null);
@@ -355,6 +361,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
             zoom={zoom}
             onZoom={setZoom}
             focus={narrow && !!st.selectedLayerId}
+            onCrop={setCropId}
           />
           {dragOver && <div className={s.dropHint}>Отпустите файл, чтобы добавить</div>}
         </div>
@@ -433,6 +440,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
           <DesignPanel
             stage={stageRef} fileError={fileError} onUpload={pickFile} onAddText={addText}
             onTemplates={() => setTemplatesOpen(true)} onReplacePhoto={pickPhotoFor} onMaskText={setMaskText}
+            onCrop={setCropId}
           />
           {/* Телефон: слои — не отдельная вкладка, а короткий список под кнопками добавления */}
           {narrow && !selected && <LayersPanel embedded hex={hex} open onToggle={() => {}} />}
@@ -476,6 +484,17 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
       )}
       {(hint ?? notice) && <div className={s.notice} role="status">{hint ?? notice}</div>}
       {templatesOpen && <TemplatePicker hex={hex} onClose={() => setTemplatesOpen(false)} />}
+      {cropLayer && garment && (
+        <CropEditor
+          src={cropLayer.src} flipX={cropLayer.flipX} crop={cropLayer.crop} lockedAspect={cropLayer.slot}
+          onClose={() => setCropId(null)}
+          onApply={(crop, src) => {
+            st.updateLayer(cropLayer.id, applyCrop(cropLayer, crop, src, areaAspect(garment, cropLayer)));
+            track('image_crop', { slot: cropLayer.slot !== undefined });
+            setCropId(null);
+          }}
+        />
+      )}
       {chartOpen && <SizeChart sizes={variant?.sizes ?? []} onClose={() => setChartOpen(false)} />}
       {orderOpen && garment && variant && price && (
         <OrderForm garment={garment} variant={variant} price={price} stage={stageRef} endpoint={ordersEndpoint} onClose={() => setOrderOpen(false)} />

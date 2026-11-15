@@ -21,13 +21,15 @@ interface Props {
   onReplacePhoto?: (id: string) => void;
   /** Поменять слово, по буквам которого обрезано фото. */
   onMaskText?: (id: string, text: string) => void;
+  /** Открыть кадрирование картинки (id слоя). */
+  onCrop?: (id: string) => void;
 }
 
 /**
  * Правая панель «Дизайн» зависит от выбора на холсте:
  * ничего не выбрано — три крупных входа (готовые принты, картинка, текст); текст — настройки текста; картинка — её параметры.
  */
-export function DesignPanel({ stage, fileError, onUpload, onAddText, onTemplates, onReplacePhoto, onMaskText }: Props) {
+export function DesignPanel({ stage, fileError, onUpload, onAddText, onTemplates, onReplacePhoto, onMaskText, onCrop }: Props) {
   const side = useConstructor((st) => st.side);
   const garment = useConstructor(selectGarment);
   const selected = useConstructor((st) => st.layers.find((l) => l.id === st.selectedLayerId));
@@ -123,7 +125,12 @@ export function DesignPanel({ stage, fileError, onUpload, onAddText, onTemplates
               </span>
             </p>
           )}
-          {selected.kind === 'image' && selected.crop && selected.slot === undefined && (
+          {selected.kind === 'image' && !selected.placeholder && onCrop && (
+            <button type="button" className={d.slotBtn} onClick={() => onCrop(selected.id)}>
+              <Icon name="crop" size={20} />{selected.slot !== undefined ? 'Подвинуть фото в рамке' : 'Кадрировать'}
+            </button>
+          )}
+          {selected.kind === 'image' && selected.crop && selected.slot === undefined && !selected.cropped && (
             <p className={d.note}>Пустые поля по краям убрали — размер и цена считаются по самому рисунку.</p>
           )}
 

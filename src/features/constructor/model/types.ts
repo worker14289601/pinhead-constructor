@@ -107,6 +107,8 @@ export interface ImageLayer extends LayerBase {
   mask?: ImageMask;
   /** Размер исходного снимка в пикселях — чтобы заново обрезать его, когда меняются пропорции окна. */
   srcSize?: { w: number; h: number };
+  /** Кадр выбран вручную (кадрирование), а не автоматической обрезкой пустых полей. */
+  cropped?: boolean;
 }
 
 export type ImageMask =

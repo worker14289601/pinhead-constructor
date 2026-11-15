@@ -76,7 +76,7 @@ const LIME = '#99ff00';
 const INK = '#000000';
 
 /** apiRef — обычный проп, а не ref: next/dynamic не пробрасывает ref в ленивый компонент. */
-export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = false }: {
+export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = false, onCrop }: {
   apiRef: RefObject<DesignStageHandle>;
   /** Масштаб, которым управляет родитель (кнопки вне холста). Без него — внутреннее состояние. */
   zoom?: number;
@@ -85,6 +85,8 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = fal
   empty?: { onUpload: () => void; dragging?: boolean };
   /** Приблизить холст к зоне печати (пока редактируют слой); переход — плавный. */
   focus?: boolean;
+  /** Открыть кадрирование картинки (id слоя) — кнопка в рамке выделения. */
+  onCrop?: (id: string) => void;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
@@ -852,6 +854,7 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = fal
           onCommit={(p) => selectedLayerId && updateLayer(selectedLayerId, p)}
           onRemove={() => selectedLayerId && removeLayer(selectedLayerId)}
           onDuplicate={() => selectedLayerId && duplicateLayer(selectedLayerId)}
+          onCrop={onCrop && selectedLayer?.kind === 'image' && !selectedLayer.placeholder ? () => onCrop(selectedLayer.id) : undefined}
         />
       )}
       </div>

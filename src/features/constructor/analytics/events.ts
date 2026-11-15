@@ -7,6 +7,7 @@ export type FunnelEvent =
   | 'garment_select'
   | 'color_select'
   | 'image_upload'
+  | 'image_crop'
   | 'text_add'
   | 'template_apply'
   | 'side_switch'

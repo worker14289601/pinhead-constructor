@@ -37,9 +37,11 @@ interface Props {
   onCommit: (patch: Partial<DesignLayer>) => void;
   onRemove: () => void;
   onDuplicate: () => void;
+  /** Кадрировать картинку; без пропа кнопки нет (левый нижний угол). */
+  onCrop?: () => void;
 }
 
-interface Geo { top: Pt; rotate: Pt; resize: Pt; remove: Pt; duplicate: Pt; label: Pt }
+interface Geo { top: Pt; rotate: Pt; resize: Pt; remove: Pt; duplicate: Pt; crop: Pt; label: Pt }
 
 type Gesture =
   | { mode: 'rotate'; center: Pt; startAngle: number; rotation0: number }
@@ -73,12 +75,13 @@ function geometry(node: Konva.Node, size: { w: number; h: number }): Geo {
     resize,
     remove: clamp(turn(t.point({ x: w, y: 0 }), OUT, -OUT)),
     duplicate: clamp(turn(t.point({ x: 0, y: 0 }), -OUT, -OUT)),
+    crop: clamp(turn(t.point({ x: 0, y: h }), -OUT, OUT)),
   };
 }
 
 const same = (a: Geo | null, b: Geo | null) => JSON.stringify(a) === JSON.stringify(b);
 
-export function SelectionControls({ stage, layer, area, size, minPx, accent, caption, onCommit, onRemove, onDuplicate }: Props) {
+export function SelectionControls({ stage, layer, area, size, minPx, accent, caption, onCommit, onRemove, onDuplicate, onCrop }: Props) {
   const [geo, setGeo] = useState<Geo | null>(null);
   const [, bump] = useReducer((n: number) => n + 1, 0);
   const gesture = useRef<Gesture | null>(null);
@@ -177,6 +180,14 @@ export function SelectionControls({ stage, layer, area, size, minPx, accent, cap
       >
         <svg viewBox="0 0 24 24" aria-hidden><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></svg>
       </button>
+      {onCrop && (
+        <button
+          type="button" className={c.btn} style={at(geo.crop)} aria-label="Кадрировать" title="Кадрировать"
+          onPointerDown={(e) => e.stopPropagation()} onClick={onCrop}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden><path d="M6 2v12a4 4 0 0 0 4 4h12M2 6h12a4 4 0 0 1 4 4v12" /></svg>
+        </button>
+      )}
       <button
         type="button" className={c.btnDanger} style={at(geo.remove)} aria-label="Удалить" title="Удалить"
         onPointerDown={(e) => e.stopPropagation()} onClick={onRemove}
