@@ -15,13 +15,15 @@ interface Props {
   fileError: string | null;
   onUpload: () => void;
   onAddText: () => void;
+  /** Открыть каталог готовых принтов; без пропа карточка «Готовые принты» не показывается. */
+  onTemplates?: () => void;
 }
 
 /**
  * Правая панель «Дизайн» зависит от выбора на холсте:
- * ничего не выбрано — крупные карточки добавления; текст — настройки текста; картинка — её параметры.
+ * ничего не выбрано — три крупных входа (готовые принты, картинка, текст); текст — настройки текста; картинка — её параметры.
  */
-export function DesignPanel({ stage, fileError, onUpload, onAddText }: Props) {
+export function DesignPanel({ stage, fileError, onUpload, onAddText, onTemplates }: Props) {
   const side = useConstructor((st) => st.side);
   const garment = useConstructor(selectGarment);
   const selected = useConstructor((st) => st.layers.find((l) => l.id === st.selectedLayerId));
@@ -45,19 +47,32 @@ export function DesignPanel({ stage, fileError, onUpload, onAddText }: Props) {
     <>
       {!selected ? (
         <>
-          <h3 className={s.h}>Дизайн · {SIDE_LABEL[side]}</h3>
+          <h3 className={s.h}>Принт · {SIDE_LABEL[side]}</h3>
           <div className={d.actions}>
-            <button className={d.cardPrimary} onClick={onUpload}>
+            {/* Главная карточка во всю ширину сверху, две остальные — в ряд под ней */}
+            <button type="button" className={d.cardPrimary} onClick={onUpload}>
               <Icon name="upload" size={24} />
-              <span className={d.cardTitle}>Загрузить картинку</span>
-              <span className={d.cardNote}>PNG, JPG, SVG · до 15 МБ</span>
+              <span className={d.cardText}>
+                <span className={d.cardTitlePrimary}>Загрузить картинку</span>
+                <span className={d.cardNote}>PNG, JPG, SVG · до 15 МБ</span>
+              </span>
             </button>
-            <button className={d.card} onClick={onAddText}>
-              <Icon name="textFont" size={24} />
-              <span className={d.cardTitle}>Добавить текст</span>
+            {onTemplates && (
+              <button type="button" className={d.card} onClick={onTemplates}>
+                <Icon name="brush" size={22} />
+                <span className={d.cardText}>
+                  <span className={d.cardTitle}>Готовые принты</span>
+                  <span className={d.cardNote}>Выберите и поменяйте текст</span>
+                </span>
+              </button>
+            )}
+            <button type="button" className={d.card} onClick={onAddText}>
+              <Icon name="textFont" size={22} />
+              <span className={d.cardText}>
+                <span className={d.cardTitle}>Добавить текст</span>
+              </span>
             </button>
           </div>
-          <p className={s.muted}>Лучше PNG с прозрачным фоном. Файл можно перетащить на изделие.</p>
         </>
       ) : null}
       {fileError && <p className={s.err}>{fileError}</p>}

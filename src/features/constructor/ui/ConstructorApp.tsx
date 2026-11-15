@@ -26,6 +26,7 @@ import { LayersPanel } from './LayersPanel';
 import { OrderForm } from './OrderForm';
 import { OrderFooter, OrderPanel } from './OrderPanel';
 import { SizeChart } from './SizeChart';
+import { TemplatePicker } from './TemplatePicker';
 import s from './constructor.module.css';
 
 // Konva работает только в браузере.
@@ -53,8 +54,11 @@ const SumRow = ({ title, meta, onClick }: { title: string; meta: string; onClick
   </button>
 );
 
-type Tab = 'garment' | 'design' | 'layers' | 'order';
-const TABS: Array<[Tab, string]> = [['garment', 'Изделие'], ['design', 'Дизайн'], ['layers', 'Слои'], ['order', 'Размеры']];
+/** Шаги на телефоне: изделие → принт → размеры; четвёртый шаг — заявка — открывает кнопка в итоге. */
+type Tab = 'garment' | 'design' | 'order';
+const STEPS: Array<[Tab, string]> = [['garment', 'Изделие'], ['design', 'Принт'], ['order', 'Размеры']];
+/** Сдвиг пальца (px), с которого жест по ручке листа — это свайп, а не нажатие. */
+const GRIP_SWIPE = 24;
 
 /**
  * ordersEndpoint — куда уходит заявка: POST {endpoint}/number выдаёт номер, POST {endpoint} принимает заявку.
@@ -75,6 +79,10 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
   const [dragOver, setDragOver] = useState(false);
   const [chartOpen, setChartOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('garment');
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  // Лист с настройками на телефоне: обычная высота или развёрнутый (холст при этом ниже).
+  const [sheetFull, setSheetFull] = useState(false);
+  const gripY = useRef<number | null>(null);
   const undoable = useConstructor(canUndo);
   const redoable = useConstructor(canRedo);
   const sides = sidesFor(garment);
@@ -88,10 +96,12 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // На мобильном выбор принта на холсте открывает его настройки (вкладка «Дизайн»).
+  // На телефоне выбор принта на холсте открывает его настройки (шаг «Принт») — с любого шага.
   useEffect(() => {
-    if (st.selectedLayerId) setTab((t) => (t === 'garment' ? 'design' : t));
+    if (st.selectedLayerId) setTab('design');
   }, [st.selectedLayerId]);
+  // Развёрнутый лист — только пока нужен: при смене шага возвращаем обычную высоту.
+  useEffect(() => setSheetFull(false), [tab]);
 
   // Телефон: каждая вкладка прокручивается сама — при смене вкладки или слоя показываем её с начала.
   const appRef = useRef<HTMLDivElement>(null);
@@ -137,7 +147,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
   // Когда фокус в поле ввода, клавиши остаются полю (там своя отмена набора).
   // Пока открыта форма заявки, клавиши холст не трогают.
   useEffect(() => {
-    if (orderOpen) return;
+    if (orderOpen || templatesOpen) return;
     const onKey = (e: KeyboardEvent) => {
       // Esc — «Готово»: закрыть настройки слоя, даже из поля ввода (пока не открыта таблица размеров).
       if (e.key === 'Escape' && !chartOpen && useConstructor.getState().selectedLayerId) {
@@ -163,7 +173,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [orderOpen, chartOpen]);
+  }, [orderOpen, chartOpen, templatesOpen]);
 
   // Черновик: при открытии спрашиваем, продолжать ли; пока не ответили — ничего не сохраняем.
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -259,7 +269,10 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
   };
 
   return (
-    <div ref={appRef} className={s.app} data-tab={tab} data-editing={selected ? '' : undefined} data-kb={kb ? '' : undefined}>
+    <div
+      ref={appRef} className={s.app} data-tab={tab} data-editing={selected ? '' : undefined} data-kb={kb ? '' : undefined}
+      data-sheet={sheetFull ? 'full' : undefined}
+    >
       {/* Изделие */}
       <section className={`${s.panel} ${s.left}`} data-section="garment">
         <h3 className={s.h}>Изделие</h3>
@@ -330,6 +343,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
               </div>
             </div>
           )}
+          {variant && <span className={s.colorName} aria-hidden>{variant.colorName}</span>}
           <div className={s.zoom} role="group" aria-label="Масштаб">
             <button type="button" onClick={() => setZoom((z) => Math.max(1, z / ZOOM_STEP))} disabled={zoom <= 1} aria-label="Уменьшить" title="Уменьшить">−</button>
             <button type="button" className={s.zoomValue} onClick={() => setZoom(1)} disabled={zoom === 1} aria-label="Сбросить масштаб" title="Сбросить масштаб">{Math.round(zoom * 100)}%</button>
@@ -338,19 +352,46 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
         </div>
       </main>
 
-      {/* Вкладки — только на мобильном */}
-      <nav className={s.tabbar}>
-        {TABS.map(([id, label]) => (
-          <button key={id} className={tab === id ? s.tabbarActive : s.tabbarBtn} onClick={() => setTab(id)}>
-            {label}
-          </button>
-        ))}
+      {/* Шаги — только на телефоне: где мы и что дальше */}
+      <nav className={s.steps} aria-label="Шаги">
+        {STEPS.map(([id, label], i) => {
+          const done = id === 'garment' ? tab !== 'garment' || hasDesign : id === 'design' ? hasDesign : !!price?.qty;
+          return (
+            <button
+              key={id} type="button" className={tab === id ? s.stepActive : s.step}
+              aria-current={tab === id ? 'step' : undefined} data-done={done ? '' : undefined} onClick={() => setTab(id)}
+            >
+              <span className={s.stepNum}>{done && tab !== id ? <Icon name="checkMark" size={14} /> : i + 1}</span>
+              {label}
+            </button>
+          );
+        })}
       </nav>
+
+      {/* Ручка листа — только на телефоне: нажатие или свайп меняет высоту панели */}
+      <button
+        type="button" className={s.grip} data-still="" aria-label={sheetFull ? 'Свернуть панель' : 'Развернуть панель'}
+        aria-expanded={sheetFull}
+        onPointerDown={(e) => { gripY.current = e.clientY; e.currentTarget.setPointerCapture?.(e.pointerId); }}
+        onPointerUp={(e) => {
+          const dy = gripY.current === null ? 0 : e.clientY - gripY.current;
+          gripY.current = null;
+          setSheetFull((v) => (dy <= -GRIP_SWIPE ? true : dy >= GRIP_SWIPE ? false : !v));
+        }}
+        onPointerCancel={() => { gripY.current = null; }}
+        // Клавиатура и программный click: без жеста — просто переключить.
+        onClick={(e) => { if (e.detail === 0) setSheetFull((v) => !v); }}
+      />
 
       <aside className={`${s.panel} ${s.right}`} data-editing={selected ? '' : undefined}>
         {/* Дизайн: содержимое зависит от выбранного слоя */}
         <section className={s.section} data-section="design">
-          <DesignPanel stage={stageRef} fileError={fileError} onUpload={() => fileRef.current?.click()} onAddText={addText} />
+          <DesignPanel
+            stage={stageRef} fileError={fileError} onUpload={() => fileRef.current?.click()} onAddText={addText}
+            onTemplates={() => setTemplatesOpen(true)}
+          />
+          {/* Телефон: слои — не отдельная вкладка, а короткий список под кнопками добавления */}
+          {narrow && !selected && <LayersPanel embedded hex={hex} open onToggle={() => {}} />}
           <input
             ref={fileRef} type="file" hidden accept={ACCEPTED_TYPES.join(',')}
             onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = ''; }}
@@ -390,6 +431,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
         />
       )}
       {notice && <div className={s.notice} role="status">{notice}</div>}
+      {templatesOpen && <TemplatePicker hex={hex} onClose={() => setTemplatesOpen(false)} />}
       {chartOpen && <SizeChart sizes={variant?.sizes ?? []} onClose={() => setChartOpen(false)} />}
       {orderOpen && garment && variant && price && (
         <OrderForm garment={garment} variant={variant} price={price} stage={stageRef} endpoint={ordersEndpoint} onClose={() => setOrderOpen(false)} />

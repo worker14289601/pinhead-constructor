@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { FONT_GROUPS, FONTS, fontDef, TEXT_COLORS } from '../config/fonts';
 import { ensureFont, onFontLoaded } from '../model/fonts';
 import { useConstructor } from '../model/store';
@@ -13,6 +13,10 @@ const ALIGNS: Array<[TextLayer['align'], string, IconName]> = [
 
 /** Текст по умолчанию у нового слоя (как в store.addText): пока он не тронут, поле сразу в фокусе. */
 const DEFAULT_TEXT = 'Твой текст';
+
+/** Группы настроек: на телефоне показывается одна, на десктопе — все подряд лентой. */
+type Group = 'text' | 'font' | 'color' | 'shape';
+const GROUPS: Array<[Group, string]> = [['text', 'Текст'], ['font', 'Шрифт'], ['color', 'Цвет'], ['shape', 'Форма']];
 
 const fontStyle = (family: string) => ({ fontFamily: `"${family}", Arial, sans-serif` });
 
@@ -36,6 +40,7 @@ export function TextPanel({ layer }: { layer: TextLayer }) {
   const { updateLayer } = useConstructor.getState();
   const [, tick] = useState(0);
   const [fontsOpen, setFontsOpen] = useState(false);
+  const [group, setGroup] = useState<Group>('text');
   const def = fontDef(layer.fontFamily);
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const stripRef = useRef<HTMLDivElement>(null);
@@ -51,13 +56,15 @@ export function TextPanel({ layer }: { layer: TextLayer }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Лента шрифтов на телефоне: выбранный шрифт показываем в поле зрения.
+  // Лента шрифтов на телефоне: при открытии группы выбранный шрифт показываем в поле зрения
+  // (пока группа скрыта, у ленты нет ширины, поэтому считаем в момент показа).
   useEffect(() => {
+    if (group !== 'font') return;
     const strip = stripRef.current;
     const active = strip?.querySelector<HTMLElement>('[aria-pressed="true"]');
     if (strip && active) strip.scrollLeft = active.offsetLeft - (strip.clientWidth - active.offsetWidth) / 2;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [group]);
   const set = (patch: Partial<TextLayer>, mode: 'commit' | 'merge' = 'commit') => updateLayer(layer.id, patch, mode);
 
   // Превью строк — текст слоя нужным шрифтом, поэтому грузим все шрифты списка (только нужные буквы).
@@ -75,17 +82,47 @@ export function TextPanel({ layer }: { layer: TextLayer }) {
     setFontsOpen(false);
   };
 
+  const on = (g: Group) => (group === g ? 'true' : 'false');
+
   return (
     <>
-      <div className={`${d.block} ${d.blockFirst}`}>
+      {/* Телефон: переключатель групп. Чипы всегда в разметке, на десктопе их прячет CSS. */}
+      <div className={d.tabs} role="tablist" aria-label="Настройки текста">
+        {GROUPS.map(([g, title]) => (
+          <button
+            key={g} type="button" role="tab" aria-selected={group === g}
+            className={group === g ? d.tabActive : d.tab} onClick={() => setGroup(g)}
+          >{title}</button>
+        ))}
+      </div>
+
+      <div className={`${d.block} ${d.blockFirst}`} data-on={on('text')}>
         <div className={d.sub}>Текст</div>
         <textarea
           ref={areaRef} className={d.textarea} rows={2} value={layer.text} aria-label="Текст" placeholder="Введите текст"
           onChange={(e) => set({ text: e.target.value }, 'merge')}
         />
+        <div className={d.seg} role="group" aria-label="Начертание и выравнивание">
+          <button
+            type="button" className={`${d.segBtn} ${d.compact}`} aria-pressed={layer.bold} disabled={!def?.bold && !layer.bold}
+            title={def && !def.bold ? 'У этого шрифта нет жирного начертания' : 'Жирный'} aria-label="Жирный"
+            onClick={() => set({ bold: !layer.bold })}
+          ><Icon name="bold" size={20} /></button>
+          <button
+            type="button" className={`${d.segBtn} ${d.compact}`} aria-pressed={layer.italic} disabled={!def?.italic && !layer.italic}
+            title={def && !def.italic ? 'У этого шрифта нет курсива' : 'Курсив'} aria-label="Курсив"
+            onClick={() => set({ italic: !layer.italic })}
+          ><Icon name="italic" size={20} /></button>
+          {ALIGNS.map(([a, label, icon]) => (
+            <button
+              key={a} type="button" className={`${d.segBtn} ${d.compact}`} aria-pressed={layer.align === a}
+              title={label} aria-label={label} onClick={() => set({ align: a })}
+            ><Icon name={icon} size={20} /></button>
+          ))}
+        </div>
       </div>
 
-      <div className={d.block}>
+      <div className={d.block} data-on={on('font')}>
         <div className={d.sub}>Шрифт</div>
         {/* Телефон: горизонтальная лента карточек */}
         <div className={d.fontStrip} ref={stripRef} role="group" aria-label="Шрифт">
@@ -110,10 +147,10 @@ export function TextPanel({ layer }: { layer: TextLayer }) {
         </button>
         {fontsOpen && (
           <div className={`${d.desktopFont} ${d.fontList}`}>
-            {FONT_GROUPS.map(([group, title]) => (
-              <div key={group} style={{ display: 'contents' }}>
+            {FONT_GROUPS.map(([grp, title]) => (
+              <div key={grp} style={{ display: 'contents' }}>
                 <div className={d.fontGroup}>{title}</div>
-                {FONTS.filter((f) => f.group === group).map((f) => (
+                {FONTS.filter((f) => f.group === grp).map((f) => (
                   <button
                     key={f.family} type="button" aria-pressed={f.family === layer.fontFamily}
                     className={f.family === layer.fontFamily ? d.fontOptActive : d.fontOpt}
@@ -129,31 +166,14 @@ export function TextPanel({ layer }: { layer: TextLayer }) {
         )}
       </div>
 
-      <div className={d.block}>
-        <div className={d.sub}>Стиль</div>
-        <div className={d.seg} role="group" aria-label="Начертание">
-          <button
-            type="button" className={`${d.segBtn} ${d.compact}`} aria-pressed={layer.bold} disabled={!def?.bold && !layer.bold}
-            title={def && !def.bold ? 'У этого шрифта нет жирного начертания' : 'Жирный'} aria-label="Жирный"
-            onClick={() => set({ bold: !layer.bold })}
-          ><Icon name="bold" size={20} /></button>
-          <button
-            type="button" className={`${d.segBtn} ${d.compact}`} aria-pressed={layer.italic} disabled={!def?.italic && !layer.italic}
-            title={def && !def.italic ? 'У этого шрифта нет курсива' : 'Курсив'} aria-label="Курсив"
-            onClick={() => set({ italic: !layer.italic })}
-          ><Icon name="italic" size={20} /></button>
-          {ALIGNS.map(([a, label, icon]) => (
-            <button
-              key={a} type="button" className={`${d.segBtn} ${d.compact}`} aria-pressed={layer.align === a}
-              title={label} aria-label={label} onClick={() => set({ align: a })}
-            ><Icon name={icon} size={20} /></button>
-          ))}
-        </div>
+      <div className={d.block} data-on={on('color')}>
+        <div className={d.sub}>Цвет</div>
         <div className={d.palette} role="group" aria-label="Цвет текста">
           {TEXT_COLORS.map((c) => (
             <button
               key={c} type="button" className={c === layer.fill.toLowerCase() ? d.dotActive : d.dot}
-              style={{ background: c }} aria-label={c} onClick={() => set({ fill: c }, 'merge')}
+              style={{ '--c': c } as CSSProperties} aria-label={c} aria-pressed={c === layer.fill.toLowerCase()}
+              onClick={() => set({ fill: c }, 'merge')}
             />
           ))}
           <label className={d.customColor} title="Свой цвет">
@@ -164,7 +184,7 @@ export function TextPanel({ layer }: { layer: TextLayer }) {
         </div>
       </div>
 
-      <div className={d.block}>
+      <div className={d.block} data-on={on('shape')}>
         <div className={d.sub}>Форма</div>
         <Range label="Межстрочный интервал" value={layer.lineHeight} shown={layer.lineHeight.toFixed(2)}
           min={0.8} max={2} step={0.05} onChange={(v) => set({ lineHeight: v }, 'merge')} />

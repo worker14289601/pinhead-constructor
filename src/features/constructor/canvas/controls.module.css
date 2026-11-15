@@ -25,11 +25,11 @@
 }
 .btn:focus-visible, .btnAccent:focus-visible, .btnDanger:focus-visible { outline: 2px solid #000; outline-offset: 2px; }
 
-/* Телефон: кнопки компактные, чтобы не закрывали принт; зона касания — 44 px за счёт невидимого поля вокруг. */
+/* Телефон: кнопка видна 32 px, а область нажатия — 44 px (прозрачное поле ::after). Углы разнесены на OUT в SelectionControls, поля соседних кнопок не пересекаются. */
 @media (pointer: coarse) {
-  .btn, .btnAccent, .btnDanger { width: 28px; height: 28px; border-width: 1px; box-shadow: 0 1px 4px rgb(0 0 0 / .22); }
-  .btn svg, .btnAccent svg, .btnDanger svg { width: 14px; height: 14px; }
-  .btn::after, .btnAccent::after, .btnDanger::after { content: ''; position: absolute; inset: -8px; border-radius: 50%; }
+  .btn, .btnAccent, .btnDanger { width: 32px; height: 32px; border-width: 1px; box-shadow: 0 1px 4px rgb(0 0 0 / .22); }
+  .btn svg, .btnAccent svg, .btnDanger svg { width: 16px; height: 16px; }
+  .btn::after, .btnAccent::after, .btnDanger::after { content: ''; position: absolute; inset: -6px; border-radius: 50%; }
   .caption { font-size: 10px; padding: 2px 7px; }
 }
 
@@ -40,31 +40,30 @@
 
 /* Пустая зона печати — одна нажимаемая область (canvas/EmptyZone.tsx) */
 .emptyRoot { position: absolute; z-index: 1; }
-.zoneBadge { position: absolute; z-index: 2; pointer-events: none; padding: 2px 7px; border-radius: 999px; background: rgb(255 255 255 / .8); color: #111; font-size: 11px; line-height: 1.3; font-weight: 700; white-space: nowrap; box-shadow: 0 0 0 1px rgb(0 0 0 / .08); }
+.zoneBadge { position: absolute; z-index: 2; pointer-events: none; padding: 1px 6px; border-radius: 999px; background: rgb(255 255 255 / .55); color: rgb(0 0 0 / .7); font-size: 10px; line-height: 1.3; font-weight: 600; white-space: nowrap; }
 .emptyZone {
-  position: absolute; inset: 0; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
-  padding: 6px; margin: 0; border: 0; border-radius: 0; cursor: pointer; color: #000; font: inherit; text-align: center;
+  position: absolute; inset: 0; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  padding: 6px; margin: 0; border: 0; border-radius: 0; cursor: pointer; color: var(--ez-ink, #111); font: inherit; text-align: center;
   background-color: var(--ez-fill);
   transition: background-color var(--t-fast, .32s);
 }
-/* Светлая ткань: заливка плотнее, чтобы читалась на розовом и молочном; тёмная: мягче, без грязного оттенка. */
-/* Ровная заливка без рисунка: на светлой ткани — нежная салатовая, на тёмной — фирменная полупрозрачная. */
-.emptyZoneLight { --ez-fill: rgb(205 255 110 / .42); --ez-fill-hover: rgb(205 255 110 / .58); }
-.emptyZoneDark { --ez-fill: rgb(153 255 0 / .16); --ez-fill-hover: rgb(153 255 0 / .26); }
-/* Насыщенные средние цвета (бордовый, фуксия): белая дымка — салатовый поверх них даёт коричневый. */
-.emptyZoneVivid { --ez-fill: rgb(255 255 255 / .2); --ez-fill-hover: rgb(255 255 255 / .3); }
+/* Заливка едва заметная: зона читается по пунктиру, а изделие под ней остаётся видимым. */
+.emptyZoneLight { --ez-fill: rgb(255 255 255 / .1); --ez-fill-hover: rgb(255 255 255 / .28); --ez-ink: #111; }
+.emptyZoneDark { --ez-fill: rgb(255 255 255 / .04); --ez-fill-hover: rgb(255 255 255 / .12); --ez-ink: #fff; }
+/* Насыщенные средние цвета (бордовый, фуксия): светлая дымка и белая надпись. */
+.emptyZoneVivid { --ez-fill: rgb(255 255 255 / .06); --ez-fill-hover: rgb(255 255 255 / .16); --ez-ink: #fff; }
 .emptyZone:hover { background-color: var(--ez-fill-hover); }
 .emptyZone:active { background-color: var(--ez-fill-hover); }
 .emptyZone:focus-visible { outline: 2px solid #000; outline-offset: 2px; background-color: var(--ez-fill-hover); }
-.emptyZoneDrag, .emptyZoneDrag:hover { background-color: rgb(153 255 0 / .4); }
+.emptyZoneDrag, .emptyZoneDrag:hover { background-color: rgb(153 255 0 / .3); }
 .emptyOutline { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
-/* Контур тихий, в тон заливки: показывает край зоны, не перетягивая внимание. */
-.emptyOutline polygon { stroke-width: 1; }
-.emptyOutlineLight polygon { stroke: rgb(90 150 0 / .3); }
-.emptyOutlineDark polygon { stroke: rgb(153 255 0 / .32); }
-.emptyOutlineVivid polygon { stroke: rgb(255 255 255 / .45); }
-.emptyIcon { flex: none; width: 34px; height: 34px; padding: 6px; box-sizing: border-box; border: 1px solid #000; border-radius: 50%; background: #99ff00; color: #000; }
-.emptyLabel { max-width: 150px; font-size: 11px; line-height: 1.25; font-weight: 800; text-transform: uppercase; text-wrap: balance; overflow-wrap: normal; word-break: normal; padding: 2px 6px; border-radius: 4px; background: rgb(255 255 255 / .85); }
+/* Тонкий пунктир в тон ткани: показывает край зоны, не перетягивая внимание. */
+.emptyOutline polygon { stroke-width: 1; stroke-dasharray: 5 4; }
+.emptyOutlineLight polygon { stroke: rgb(0 0 0 / .4); }
+.emptyOutlineDark polygon { stroke: rgb(255 255 255 / .5); }
+.emptyOutlineVivid polygon { stroke: rgb(255 255 255 / .6); }
+.emptyIcon { flex: none; width: 32px; height: 32px; padding: 7px; box-sizing: border-box; border: 1px solid currentColor; border-radius: 50%; background: transparent; color: inherit; opacity: .8; }
+.emptyLabel { max-width: 150px; font-size: var(--fs-sm, 14px); line-height: 1.25; font-weight: 500; text-wrap: balance; overflow-wrap: normal; word-break: normal; opacity: .85; }
 @media (prefers-reduced-motion: reduce) { .emptyZone { transition: none; } }
 
 /* Снимок прежней стороны на время анимации поворота (canvas/turn.ts) */

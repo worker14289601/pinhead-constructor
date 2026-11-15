@@ -202,10 +202,13 @@ export function OrderFooter({ price, hasDesign, onOrder }: { price: Price | null
         <div className={o.sum}>{price ? <CountUp value={price.qty ? price.total : price.current?.perItem ?? 0} /> : '—'}</div>
         {price?.qty ? (
           <p className={o.sub2}>{one ? `${one.qty} шт · ${rub(one.perItem)} за шт` : `${price.qty} шт · ${colorsWord(price.lines.length)}`}</p>
+        ) : price?.current ? (
+          <p className={o.sub2}>за 1 шт</p>
         ) : null}
       </div>
+      {/* aria-disabled — только для читалок: кнопка выглядит главной всегда, а нажатие подсказывает следующий шаг */}
       <button className={o.button} onClick={onOrder} aria-disabled={!canOrder}>
-        {!hasDesign ? 'Добавить дизайн' : !price?.qty ? 'Выбрать размеры' : 'Оформить заявку'}
+        {!hasDesign ? 'Добавить принт' : !price?.qty ? 'Выбрать размеры' : 'Оформить заявку'}
       </button>
     </footer>
   );

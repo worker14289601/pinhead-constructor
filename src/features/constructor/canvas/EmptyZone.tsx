@@ -93,7 +93,7 @@ export function EmptyZone({ rect, dragging, sizeText, outline, tone = 'dark', on
         <svg className={c.emptyIcon} viewBox="0 0 24 24" aria-hidden>
           <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
         </svg>
-        {!narrow && <span className={c.emptyLabel}>Нажмите, чтобы загрузить картинку</span>}
+        {!narrow && <span className={c.emptyLabel}>Загрузить картинку</span>}
       </button>
       {/* Контур отдельным SVG: clip-path у кнопки обрезал бы собственную рамку. */}
       <svg className={`${c.emptyOutline} ${TONE_LINE[tone]}`} viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
