@@ -247,8 +247,9 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
         number,
         garment: { id: garment.id, name: garment.name },
         method,
-        lines: price.lines.map((l) => ({ productId: l.productId, color: l.color, sizes: Object.fromEntries(l.sizes), perItem: l.perItem })),
-        price: { sides: price.lines[0]?.sides ?? [], total: price.total },
+        // Цену сервер считает сам по каталогу и прайсу; от конструктора — только что и сколько печатать.
+        lines: price.lines.map((l) => ({ productId: l.productId, color: l.color, sizes: Object.fromEntries(l.sizes) })),
+        printSizes: (price.lines[0]?.sides ?? []).map(({ side, wCm, hCm }) => ({ side, wCm, hCm })),
         contacts,
         utm: getUtm(),
         page: window.location.href.split('?')[0],

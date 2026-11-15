@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { hexToRgb } from '../model/color';
 
 /**
  * Перекраска серых мокапов. Пиксель s = яркость/128:
@@ -111,13 +112,6 @@ export function useTintedMockup(url: string | null, hex: string) {
   return res;
 }
 
-/** '#fff' | '#ffffff' → [r, g, b]. */
-export function hexToRgb(hex: string): [number, number, number] {
-  const h = hex.replace('#', '');
-  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h.slice(0, 6);
-  const n = parseInt(full, 16) || 0;
-  return [n >> 16, (n >> 8) & 255, n & 255];
-}
 
 /** Светлый ли цвет — для контраста рамок и текста по умолчанию. */
 export function isLight(hex: string) {

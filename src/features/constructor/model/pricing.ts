@@ -1,5 +1,6 @@
-import { priceListFor, type FormatPrice, type PriceList, type PrintFormat } from '../config/pricing';
-import type { PrintMethod, Side, SizeQuantities } from './types';
+import { priceListFor, WHITE_MIN_CHANNEL, type FormatPrice, type PriceList, type PrintFormat } from '../config/pricing';
+import { hexToRgb } from './color';
+import type { Garment, PrintMethod, Side, SizeQuantities } from './types';
 
 /** Габарит принта на стороне в сантиметрах (считается из слоёв, см. bounds.ts). */
 export type SideBounds = Partial<Record<Side, { wCm: number; hCm: number } | null>>;
@@ -68,6 +69,15 @@ export interface PriceVariant {
   /** Все размеры цвета по шкале — порядок строк размеров в заявке. */
   sizeNames: string[];
   sizes: SizeQuantities;
+}
+
+/** Цвета модели для расчёта из каталога и количеств — одинаково в конструкторе и при приёме заявки. */
+export function priceVariants(garment: Garment, quantities: Record<string, SizeQuantities>): PriceVariant[] {
+  return garment.variants.map((v) => ({
+    productId: v.productId, color: v.colorName, hex: v.hex, garmentPrice: v.price,
+    isWhite: hexToRgb(v.hex).every((c) => c >= WHITE_MIN_CHANNEL),
+    sizeNames: v.sizes, sizes: quantities[v.productId] ?? {},
+  }));
 }
 
 export function calcPrice(args: {

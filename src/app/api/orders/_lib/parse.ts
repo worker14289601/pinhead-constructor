@@ -1,4 +1,8 @@
+import { fetchCatalog } from '@/features/constructor/api/catalog';
+import type { SideBounds } from '@/features/constructor/model/pricing';
+import type { Garment, PrintMethod, Side } from '@/features/constructor/model/types';
 import { newOrderNumber, ORDER_NUMBER } from './number';
+import { priceOrder, type RequestedLine } from './price';
 
 /** Проверенная заявка: всё, что пришло от клиента, обрезано и приведено к типам. */
 export interface Order {
@@ -9,7 +13,7 @@ export interface Order {
   lines: OrderLine[];
   /** Всего штук по всем цветам. */
   qty: number;
-  /** Сумма строк, посчитанная здесь: perItem × qty по каждому цвету. */
+  /** Сумма, посчитанная сервером по каталогу и прайсу (см. price.ts); цена от клиента не принимается. */
   total: number;
   /** Печать по сторонам — готовые строки для сообщения. */
   sides: string[];
@@ -125,6 +129,7 @@ export async function parseOrder(req: Request): Promise<Order> {
   const rawOrderLines: unknown[] = Array.isArray(raw.lines) ? raw.lines : [];
   const files: OrderFile[] = [];
   const seen = new Set<string>();
+  const printPx: Partial<Record<Side, { w: number; h: number }>> = {};
   let totalSize = 0;
   for (const [key, v] of form.entries()) {
     if (typeof v === 'string') continue;
@@ -136,8 +141,15 @@ export async function parseOrder(req: Request): Promise<Order> {
     totalSize += v.size;
     if (totalSize > TOTAL_MAX_MB * MB) throw new BadOrder('file_too_large', 413);
     const kind = FILE_KINDS[v.type];
-    if (!kind.looksRight(new Uint8Array(await v.slice(0, HEAD_BYTES).arrayBuffer()))) throw new BadOrder('bad_file');
+    const head = new Uint8Array(await v.slice(0, HEAD_BYTES).arrayBuffer());
+    if (!kind.looksRight(head)) throw new BadOrder('bad_file');
     const m = key.match(rule.key)!;
+    // Размер файла печати в пикселях — из заголовка PNG (IHDR): по нему сервер считает габарит принта.
+    if (key.startsWith('print_')) {
+      if (head.length < 24) throw new BadOrder('bad_file');
+      const dv = new DataView(head.buffer, head.byteOffset);
+      printPx[m[1] as Side] = { w: dv.getUint32(16), h: dv.getUint32(20) };
+    }
     // Превью по цветам: индекс — номер строки заявки, в подписи нужен её цвет.
     const pv = key.match(PREVIEW_KEY);
     const color = pv ? str(obj(rawOrderLines[Number(pv[1])]).color, 60) : '';
@@ -163,42 +175,44 @@ export async function parseOrder(req: Request): Promise<Order> {
   const method = str(raw.method, 8);
   if (!METHODS.includes(method)) throw new BadOrder('bad_method');
 
-  // Количество считаем сами из размеров; итог — сумма по цветам: цена за штуку из расчёта конструктора × количество.
-  const rawLines = rawOrderLines.slice(0, MAX_LINES).map(obj);
-  const lines: OrderLine[] = [];
-  rawLines.forEach((l) => {
-    const sizes = Object.entries(obj(l.sizes))
+  // От клиента берём только что и сколько: изделие (productId) и количество по размерам. Цену считает сервер.
+  const requested: RequestedLine[] = rawOrderLines.slice(0, MAX_LINES).map(obj).map((l) => ({
+    productId: str(l.productId, 40),
+    sizes: Object.fromEntries(Object.entries(obj(l.sizes))
       .slice(0, 40)
       .map(([k, n]): [string, number] => [str(k, 12), Math.round(Number(n))])
-      .filter(([k, n]) => k && n > 0 && n <= 999);
-    const qty = sizes.reduce((s, [, n]) => s + n, 0);
-    if (!qty) return;
-    const perItem = Math.round(Number(l.perItem));
-    if (!Number.isFinite(perItem) || perItem < 0) throw new BadOrder('bad_price');
-    lines.push({ color: str(l.color, 60), sizes, qty, perItem, total: perItem * qty });
-  });
-  if (!lines.length) throw new BadOrder('no_sizes');
-  const qty = lines.reduce((s, l) => s + l.qty, 0);
-  const total = lines.reduce((s, l) => s + l.total, 0);
+      .filter(([k, n]) => k && n > 0 && n <= 999)),
+  })).filter((l) => l.productId && Object.keys(l.sizes).length);
+  if (!requested.length) throw new BadOrder('no_sizes');
 
-  const price = obj(raw.price);
-  const sides = (Array.isArray(price.sides) ? price.sides : [])
-    .map(obj)
-    .filter((x) => typeof x.side === 'string' && x.side in SIDE_NAME)
-    .slice(0, 4)
-    .map((x) => {
-      const size = Number(x.wCm) > 0 && Number(x.hCm) > 0 ? ` ≈${Math.round(Number(x.wCm))}×${Math.round(Number(x.hCm))} см` : '';
-      return `${SIDE_NAME[x.side as string]} ${str(x.format, 4)}${x.oversize ? ' (крупнее формата)' : ''}${size}`;
-    });
+  // Габарит принта, который посчитал конструктор: сервер возьмёт не меньше, чем выходит по файлу печати.
+  const claimed: SideBounds = {};
+  for (const x of (Array.isArray(raw.printSizes) ? raw.printSizes : []).map(obj)) {
+    const [w, h] = [Number(x.wCm), Number(x.hCm)];
+    if (typeof x.side === 'string' && x.side in SIDE_NAME && w > 0 && h > 0 && w < 1000 && h < 1000) {
+      claimed[x.side as Side] = { wCm: w, hCm: h };
+    }
+  }
 
-  const garment = obj(raw.garment);
+  let catalog: Garment[];
+  try {
+    catalog = await fetchCatalog();
+  } catch {
+    throw new BadOrder('catalog_unavailable', 503);
+  }
+  const priced = priceOrder(catalog, method as PrintMethod, requested, printPx, claimed);
+  if (!priced) throw new BadOrder('bad_product');
+  const { lines, qty, total } = priced;
+  const sides = priced.sides.map((x) =>
+    `${SIDE_NAME[x.side]} ${x.format}${x.oversize ? ' (крупнее формата)' : ''} ≈${Math.round(x.wCm)}×${Math.round(x.hCm)} см`);
+
   const rawUtm = obj(raw.utm);
   const utm: Record<string, string> = {};
   for (const k of UTM_KEYS) if (str(rawUtm[k], 200)) utm[k] = str(rawUtm[k], 200);
 
   return {
     number,
-    garment: { name: str(garment.name, 120) },
+    garment: { name: priced.garmentName },
     method, lines, qty, total, sides, contacts, utm,
     page: /^https?:\/\//.test(str(raw.page, 300)) ? str(raw.page, 300) : '',
     files,

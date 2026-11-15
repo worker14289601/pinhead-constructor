@@ -6,12 +6,12 @@ import { track } from '../analytics/events';
 import { getUtm } from '../analytics/utm';
 import { printAreaFor, sidesFor } from '../config/print-areas';
 import { FRAME } from '../config/garment-shapes';
-import { hexToRgb, isLight } from '../canvas/tint';
+import { isLight } from '../canvas/tint';
 import { designBounds } from '../model/bounds';
 import { clearDraft, hasContent, loadDraft, saveDraft, type Draft } from '../model/draft';
 import { ensureFont, onFontLoaded } from '../model/fonts';
-import { calcPrice } from '../model/pricing';
-import { METHOD_INFO, WHITE_MIN_CHANNEL } from '../config/pricing';
+import { calcPrice, priceVariants } from '../model/pricing';
+import { METHOD_INFO } from '../config/pricing';
 import { validateFile, ACCEPTED_TYPES } from '../model/quality';
 import { canRedo, canUndo, selectGarment, selectVariant, useConstructor, variantQty } from '../model/store';
 import { contentBox } from '../model/trim';
@@ -202,11 +202,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
     if (!variant || !garment) return null;
     // Габарит — только по сторонам модели: печать на рукаве у шоппера в цену не идёт.
     const bounds = designBounds(garment, st.layers);
-    const variants = garment.variants.map((v) => ({
-      productId: v.productId, color: v.colorName, hex: v.hex, garmentPrice: v.price,
-      isWhite: hexToRgb(v.hex).every((c) => c >= WHITE_MIN_CHANNEL),
-      sizeNames: v.sizes, sizes: st.quantities[v.productId] ?? {},
-    }));
+    const variants = priceVariants(garment, st.quantities);
     return calcPrice({ method: st.method, bounds, variants, currentId: variant.productId });
     // fontTick: габарит текста зависит от загруженного шрифта.
     // eslint-disable-next-line react-hooks/exhaustive-deps
