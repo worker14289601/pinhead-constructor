@@ -85,6 +85,8 @@ interface LayerBase {
   rotation: number;
   /** Отражение по горизонтали: рисуется внутри слоя, поворот и размер от него не зависят. */
   flipX?: boolean;
+  /** Отражение по вертикали — так же, внутри слоя. */
+  flipY?: boolean;
 }
 
 export interface ImageLayer extends LayerBase {
@@ -109,13 +111,20 @@ export interface ImageLayer extends LayerBase {
   srcSize?: { w: number; h: number };
   /** Кадр выбран вручную (кадрирование), а не автоматической обрезкой пустых полей. */
   cropped?: boolean;
+  /** Кадр до выбора формы обрезки — к нему возвращает «Без формы» (null — снимок целиком). */
+  beforeShape?: import('./trim').CropRect | null;
 }
 
 export type ImageMask =
   /** Фото видно сквозь буквы слова. */
   | { kind: 'text'; text: string; fontFamily: string; bold: boolean }
   /** Фото нарезано на count полос; gap — просвет между ними в долях высоты. */
-  | { kind: 'strips'; count: number; gap: number };
+  | { kind: 'strips'; count: number; gap: number }
+  /** Фото обрезано по форме (круг, сердце…), которую клиент выбрал сам. */
+  | { kind: 'shape'; shape: PhotoShape };
+
+/** Формы обрезки своего фото. Контуры — config/photo-shapes. */
+export type PhotoShape = 'circle' | 'rounded' | 'heart' | 'star' | 'arch' | 'hexagon';
 
 export interface TextLayer extends LayerBase {
   kind: 'text';

@@ -8,6 +8,7 @@ export type FunnelEvent =
   | 'color_select'
   | 'image_upload'
   | 'image_crop'
+  | 'image_shape'
   | 'text_add'
   | 'template_apply'
   | 'side_switch'

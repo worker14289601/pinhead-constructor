@@ -11,10 +11,14 @@ export interface CropEditorProps {
   src: string;
   /** Слой зеркальный: показываем картинку отражённой, работаем в том, что видит человек. */
   flipX?: boolean;
+  /** Слой отражён по вертикали — так же показываем перевёрнутым. */
+  flipY?: boolean;
   /** Текущая обрезка в пикселях ИСХОДНИКА (без зеркала); нет — вся картинка. */
   crop?: CropRect;
   /** Жёсткие пропорции высота/ширина (окно под фото в шаблоне). */
   lockedAspect?: number;
+  /** Форма обрезки слоя: её контур рисуется в рамке, пропорции задаёт lockedAspect. */
+  shape?: { d: string; aspect: number; label: string };
   /** Обрезка в пикселях исходника, без зеркала, целые, внутри картинки. */
   onApply: (crop: CropRect, srcSize: { w: number; h: number }) => void;
   onClose: () => void;
@@ -80,7 +84,7 @@ function refit(cur: R, aspect: number, iw: number, ih: number, min: number): R {
 }
 
 /** Модалка кадрирования фото: рамка поверх целой картинки, остальное затемнено. */
-export function CropEditor({ src, flipX, crop, lockedAspect, onApply, onClose }: CropEditorProps) {
+export function CropEditor({ src, flipX, flipY, crop, lockedAspect, shape, onApply, onClose }: CropEditorProps) {
   const { leaving, dismiss } = useDismiss();
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [failed, setFailed] = useState(false);
@@ -117,7 +121,7 @@ export function CropEditor({ src, flipX, crop, lockedAspect, onApply, onClose }:
     const [w, h] = [img.naturalWidth, img.naturalHeight];
     let r: R = { x: 0, y: 0, w, h };
     if (crop && crop.width > 0 && crop.height > 0) {
-      r = { x: flipX ? w - crop.x - crop.width : crop.x, y: crop.y, w: crop.width, h: crop.height };
+      r = { x: flipX ? w - crop.x - crop.width : crop.x, y: flipY ? h - crop.y - crop.height : crop.y, w: crop.width, h: crop.height };
     }
     if (lockedAspect && Math.abs(r.h / r.w - lockedAspect) / lockedAspect > 0.02) {
       const cc = coverCrop(w, h, lockedAspect);
@@ -144,11 +148,12 @@ export function CropEditor({ src, flipX, crop, lockedAspect, onApply, onClose }:
     if (!rect || !iw) return;
     const vx = flipX ? iw - rect.x - rect.w : rect.x; // обратно в координаты исходника
     const x0 = clamp(Math.round(vx), 0, iw - 1);
-    const y0 = clamp(Math.round(rect.y), 0, ih - 1);
+    const vy = flipY ? ih - rect.y - rect.h : rect.y;
+    const y0 = clamp(Math.round(vy), 0, ih - 1);
     const x1 = clamp(Math.round(vx + rect.w), x0 + 1, iw);
-    const y1 = clamp(Math.round(rect.y + rect.h), y0 + 1, ih);
+    const y1 = clamp(Math.round(vy + rect.h), y0 + 1, ih);
     dismiss(onApply, { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }, { w: iw, h: ih });
-  }, [rect, iw, ih, flipX, dismiss, onApply]);
+  }, [rect, iw, ih, flipX, flipY, dismiss, onApply]);
 
   // Клавиатура: Esc — закрыть, Enter — готово (на кнопке Enter нажимает её сам).
   const keys = useRef({ close, apply });
@@ -177,7 +182,7 @@ export function CropEditor({ src, flipX, crop, lockedAspect, onApply, onClose }:
     }
     const cb = img ? contentBox(img) : null;
     const src0 = cb ?? { x: 0, y: 0, width: iw, height: ih };
-    setRect({ x: flipX ? iw - src0.x - src0.width : src0.x, y: src0.y, w: src0.width, h: src0.height });
+    setRect({ x: flipX ? iw - src0.x - src0.width : src0.x, y: flipY ? ih - src0.y - src0.height : src0.y, w: src0.width, h: src0.height });
   };
 
   const down = (e: RPointerEvent<HTMLElement>, mode: Mode) => {
@@ -234,7 +239,7 @@ export function CropEditor({ src, flipX, crop, lockedAspect, onApply, onClose }:
           ))}
         </div>
       ) : (
-        <p className={c.note}>Пропорции заданы рамкой принта</p>
+        <p className={c.note}>{shape ? `Пропорции заданы формой «${shape.label}»` : 'Пропорции заданы рамкой принта'}</p>
       )}
 
       <div ref={stageRef} className={c.stage}>
@@ -242,7 +247,7 @@ export function CropEditor({ src, flipX, crop, lockedAspect, onApply, onClose }:
           <div className={c.frame} style={{ width: px(iw), height: px(ih) }}>
             <div className={c.clip}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={src} alt="" draggable={false} className={c.img} style={flipX ? { transform: 'scaleX(-1)' } : undefined} />
+              <img src={src} alt="" draggable={false} className={c.img} style={flipX || flipY ? { transform: `scale(${flipX ? -1 : 1}, ${flipY ? -1 : 1})` } : undefined} />
               <div className={c.dim} style={{ left: px(rect.x), top: px(rect.y), width: px(rect.w), height: px(rect.h) }} />
             </div>
             <div
@@ -253,6 +258,16 @@ export function CropEditor({ src, flipX, crop, lockedAspect, onApply, onClose }:
               onPointerUp={up}
               onPointerCancel={up}
             >
+              {shape && (
+                // Контур формы: снаружи — притенение, по краю — линия; отражается вместе с фото.
+                <svg
+                  className={c.shape} viewBox={`0 0 100 ${100 * shape.aspect}`} preserveAspectRatio="none" aria-hidden="true"
+                  style={flipX || flipY ? { transform: `scale(${flipX ? -1 : 1}, ${flipY ? -1 : 1})` } : undefined}
+                >
+                  <path d={`M0 0H100V${100 * shape.aspect}H0Z ${shape.d}`} fillRule="evenodd" fill="rgb(0 0 0 / .45)" />
+                  <path d={shape.d} fill="none" stroke="#fff" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+                </svg>
+              )}
               {(aspect ? CORNERS : [...EDGES, ...CORNERS]).map((m) => (
                 <span key={m} className={`${c.h} ${c[`h_${m}`]}`} aria-hidden="true" onPointerDown={(e) => down(e, m)} />
               ))}

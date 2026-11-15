@@ -19,15 +19,20 @@ interface Props {
 /** Имя узлов дизайна — по нему холст отличает их от служебных (тени, рамки). */
 export const DESIGN_NODE = 'design';
 
-/** Рисует Konva.Image зеркально по горизонтали (с учётом обрезки пустых полей). */
+/** Отражение внутри прямоугольника w×h: по горизонтали и/или по вертикали. */
+function mirror(c: CanvasRenderingContext2D, w: number, h: number, fx?: boolean, fy?: boolean) {
+  if (fx) { c.translate(w, 0); c.scale(-1, 1); }
+  if (fy) { c.translate(0, h); c.scale(1, -1); }
+}
+
+/** Рисует Konva.Image зеркально (с учётом обрезки пустых полей). */
 function flippedImage(ctx: Konva.Context, shape: Konva.Shape) {
   const img = (shape as Konva.Image).image() as CanvasImageSource | undefined;
   if (!img) return;
   const c = ctx._context;
   const crop = shape.getAttr('crop') as { x: number; y: number; width: number; height: number } | undefined;
   c.save();
-  c.translate(shape.width(), 0);
-  c.scale(-1, 1);
+  mirror(c, shape.width(), shape.height(), shape.getAttr('flipX'), shape.getAttr('flipY'));
   if (crop) c.drawImage(img, crop.x, crop.y, crop.width, crop.height, 0, 0, shape.width(), shape.height());
   else c.drawImage(img, 0, 0, shape.width(), shape.height());
   c.restore();
@@ -73,10 +78,12 @@ export function LayerNode({ layer, area, onSelect, onChange, onDrag }: Props) {
           const c = ctx._context;
           const src = layer.crop ?? { x: 0, y: 0, width: image.naturalWidth, height: image.naturalHeight };
           c.save();
-          if (layer.flipX) { c.translate(shape.width(), 0); c.scale(-1, 1); }
+          mirror(c, shape.width(), shape.height(), layer.flipX, layer.flipY);
           drawMasked(c, image, src, shape.width(), shape.height(), mask);
           c.restore();
-        } : layer.flipX ? flippedImage : undefined}
+        } : layer.flipX || layer.flipY ? flippedImage : undefined}
+        flipX={layer.flipX}
+        flipY={layer.flipY}
         image={img}
         crop={layer.crop}
         width={layer.width * area.w}
@@ -103,7 +110,7 @@ export function LayerNode({ layer, area, onSelect, onChange, onDrag }: Props) {
         c.textAlign = box.centered ? 'center' : 'left';
         c.textBaseline = 'alphabetic';
         c.lineJoin = 'round';
-        if (layer.flipX) { c.translate(box.width, 0); c.scale(-1, 1); }
+        mirror(c, box.width, box.height, layer.flipX, layer.flipY);
         const put = (paint: (it: (typeof box.items)[number]) => void) => {
           for (const it of box.items) {
             c.save();

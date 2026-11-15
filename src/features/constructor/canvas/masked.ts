@@ -1,3 +1,4 @@
+import { PHOTO_SHAPE } from '../config/photo-shapes';
 import { maskStyle } from '../model/slot';
 import { measureText, textFont } from '../model/trim';
 import type { ImageMask } from '../model/types';
@@ -5,6 +6,8 @@ import type { ImageMask } from '../model/types';
 /** Предел стороны буфера, px: больше canvas на телефонах может не выделить. */
 const MAX_SIDE = 4096;
 let buffer: HTMLCanvasElement | null = null;
+
+const shapePaths = new Map<string, Path2D>();
 
 type Src = { x: number; y: number; width: number; height: number };
 
@@ -14,6 +17,19 @@ type Src = { x: number; y: number; width: number; height: number };
  */
 export function drawMasked(c: CanvasRenderingContext2D, img: CanvasImageSource, src: Src, w: number, h: number, mask: ImageMask) {
   if (w <= 0 || h <= 0) return;
+  if (mask.kind === 'shape') {
+    // Контур задан в рамке 100 × 100·aspect: растягиваем его под w×h только на время обрезки.
+    const def = PHOTO_SHAPE[mask.shape];
+    let path = shapePaths.get(def.id);
+    if (!path) shapePaths.set(def.id, (path = new Path2D(def.d)));
+    c.save();
+    c.scale(w / 100, h / (100 * def.aspect));
+    c.clip(path);
+    c.scale(100 / w, (100 * def.aspect) / h);
+    c.drawImage(img, src.x, src.y, src.width, src.height, 0, 0, w, h);
+    c.restore();
+    return;
+  }
   if (mask.kind === 'strips') {
     const gap = mask.gap * h;
     const band = (h - gap * (mask.count - 1)) / mask.count;

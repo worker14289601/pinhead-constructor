@@ -14,10 +14,11 @@ import { calcPrice, priceVariants } from '../model/pricing';
 import { METHOD_INFO } from '../config/pricing';
 import { validateFile, ACCEPTED_TYPES } from '../model/quality';
 import { canRedo, canUndo, selectGarment, selectVariant, useConstructor, variantQty } from '../model/store';
-import { applyCrop, areaAspect } from '../model/crop';
+import { PHOTO_SHAPE } from '../config/photo-shapes';
+import { applyCrop, applyShape, areaAspect } from '../model/crop';
 import { coverCrop, maskAspect, refitSlot } from '../model/slot';
 import { contentBox } from '../model/trim';
-import { SIDE_LABEL, SIDE_TAB } from '../model/types';
+import { SIDE_LABEL, SIDE_TAB, type PhotoShape } from '../model/types';
 import type { DesignStageHandle } from '../canvas/DesignStage';
 import { MAX_USER_ZOOM, ZOOM_STEP } from '../canvas/zoom';
 import { GarmentPicker } from './GarmentPicker';
@@ -242,6 +243,21 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
     const mask = { ...l.mask, text };
     st.updateLayer(id, { mask, ...refitSlot(l, maskAspect(mask)) }, 'merge');
   };
+  /** Форма обрезки своего фото; размер снимка берём из самой картинки — у старых слоёв его нет в данных. */
+  const setShape = (id: string, shape: PhotoShape | null) => {
+    const l = st.layers.find((x) => x.id === id);
+    if (l?.kind !== 'image' || !garment) return;
+    const img = new window.Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const cur = useConstructor.getState().layers.find((x) => x.id === id);
+      if (cur?.kind !== 'image' || !img.naturalWidth || !img.naturalHeight) return;
+      const src = { w: img.naturalWidth, h: img.naturalHeight };
+      st.updateLayer(id, applyShape(cur, shape ? PHOTO_SHAPE[shape] : null, src, areaAspect(garment, cur)));
+      track('image_shape', { shape: shape ?? 'none' });
+    };
+    img.src = l.src;
+  };
   const pickFile = () => { replaceId.current = null; fileRef.current?.click(); };
 
   const onFile = (f?: File) => {
@@ -290,6 +306,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
   const selected = st.layers.find((l) => l.id === st.selectedLayerId);
   const cropTarget = st.layers.find((l) => l.id === cropId);
   const cropLayer = cropTarget?.kind === 'image' ? cropTarget : undefined;
+  const cropShape = cropLayer?.mask?.kind === 'shape' ? PHOTO_SHAPE[cropLayer.mask.shape] : undefined;
 
   // «Готово» из строки-сводки: снимаем выбор и показываем раздел целиком.
   const layersRef = useRef<HTMLElement>(null);
@@ -440,7 +457,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
           <DesignPanel
             stage={stageRef} fileError={fileError} onUpload={pickFile} onAddText={addText}
             onTemplates={() => setTemplatesOpen(true)} onReplacePhoto={pickPhotoFor} onMaskText={setMaskText}
-            onCrop={setCropId}
+            onCrop={setCropId} onShape={setShape}
           />
           {/* Телефон: слои — не отдельная вкладка, а короткий список под кнопками добавления */}
           {narrow && !selected && <LayersPanel embedded hex={hex} open onToggle={() => {}} />}
@@ -486,7 +503,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
       {templatesOpen && <TemplatePicker hex={hex} onClose={() => setTemplatesOpen(false)} />}
       {cropLayer && garment && (
         <CropEditor
-          src={cropLayer.src} flipX={cropLayer.flipX} crop={cropLayer.crop} lockedAspect={cropLayer.slot}
+          src={cropLayer.src} flipX={cropLayer.flipX} flipY={cropLayer.flipY} crop={cropLayer.crop} lockedAspect={cropLayer.slot ?? cropShape?.aspect} shape={cropShape}
           onClose={() => setCropId(null)}
           onApply={(crop, src) => {
             st.updateLayer(cropLayer.id, applyCrop(cropLayer, crop, src, areaAspect(garment, cropLayer)));

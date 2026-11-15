@@ -42,6 +42,9 @@
     linear-gradient(rgb(255 255 255 / .45), rgb(255 255 255 / .45)) 0 calc(200% / 3) / 100% 1px no-repeat;
 }
 
+/* Контур формы обрезки поверх кадра */
+.shape { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+
 /* Ручка: зона нажатия 44px, видимый значок рисует ::before */
 .h { position: absolute; width: var(--tap, 44px); height: var(--tap, 44px); touch-action: none; }
 .h::before {

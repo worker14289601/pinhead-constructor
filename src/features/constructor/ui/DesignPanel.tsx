@@ -2,9 +2,11 @@
 import type { RefObject } from 'react';
 import type { DesignStageHandle } from '../canvas/DesignStage';
 import { printAreaFor } from '../config/print-areas';
+import { areaAspect, quarterTurn } from '../model/crop';
 import { imageDpi, MIN_DPI } from '../model/quality';
 import { selectGarment, useConstructor } from '../model/store';
-import { SIDE_LABEL, SIDE_TAB } from '../model/types';
+import { SIDE_LABEL, SIDE_TAB, type PhotoShape } from '../model/types';
+import { ShapePicker } from './ShapePicker';
 import { Icon, type IconName } from './icons';
 import { TextPanel } from './TextPanel';
 import s from './constructor.module.css';
@@ -23,13 +25,15 @@ interface Props {
   onMaskText?: (id: string, text: string) => void;
   /** Открыть кадрирование картинки (id слоя). */
   onCrop?: (id: string) => void;
+  /** Форма обрезки своего фото; null — без формы. */
+  onShape?: (id: string, shape: PhotoShape | null) => void;
 }
 
 /**
  * Правая панель «Дизайн» зависит от выбора на холсте:
  * ничего не выбрано — три крупных входа (готовые принты, картинка, текст); текст — настройки текста; картинка — её параметры.
  */
-export function DesignPanel({ stage, fileError, onUpload, onAddText, onTemplates, onReplacePhoto, onMaskText, onCrop }: Props) {
+export function DesignPanel({ stage, fileError, onUpload, onAddText, onTemplates, onReplacePhoto, onMaskText, onCrop, onShape }: Props) {
   const side = useConstructor((st) => st.side);
   const garment = useConstructor(selectGarment);
   const selected = useConstructor((st) => st.layers.find((l) => l.id === st.selectedLayerId));
@@ -45,6 +49,8 @@ export function DesignPanel({ stage, fileError, onUpload, onAddText, onTemplates
     { icon: 'alignCenterY', label: 'По центру по вертикали', run: () => stage.current?.align(selected.id, 'centerY') },
     { icon: 'fit', label: 'Вписать: максимальный размер в зоне печати', run: () => stage.current?.align(selected.id, 'fit') },
     { icon: 'flip', label: 'Отразить по горизонтали', run: () => updateLayer(selected.id, { flipX: !selected.flipX }), pressed: !!selected.flipX },
+    { icon: 'flipV', label: 'Отразить по вертикали', run: () => updateLayer(selected.id, { flipY: !selected.flipY }), pressed: !!selected.flipY },
+    ...(garment ? [{ icon: 'rotate' as const, label: 'Повернуть на 90°', run: () => updateLayer(selected.id, quarterTurn(selected, areaAspect(garment, selected))) }] : []),
   ] : [];
 
   const kindLabel = selected?.kind === 'text' ? 'Текст' : 'Картинка';
@@ -130,7 +136,14 @@ export function DesignPanel({ stage, fileError, onUpload, onAddText, onTemplates
               <Icon name="crop" size={20} />{selected.slot !== undefined ? 'Подвинуть фото в рамке' : 'Кадрировать'}
             </button>
           )}
-          {selected.kind === 'image' && selected.crop && selected.slot === undefined && !selected.cropped && (
+          {selected.kind === 'image' && onShape && selected.slot === undefined && !selected.placeholder && !selected.isVector
+            && (!selected.mask || selected.mask.kind === 'shape') && (
+            <ShapePicker
+              value={selected.mask?.kind === 'shape' ? selected.mask.shape : null}
+              onChange={(sh) => onShape(selected.id, sh)}
+            />
+          )}
+          {selected.kind === 'image' && selected.crop && selected.slot === undefined && !selected.cropped && !selected.mask && (
             <p className={d.note}>Пустые поля по краям убрали — размер и цена считаются по самому рисунку.</p>
           )}
 
