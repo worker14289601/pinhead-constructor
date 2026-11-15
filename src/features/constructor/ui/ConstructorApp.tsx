@@ -179,6 +179,13 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
   const [draft, setDraft] = useState<Draft | null>(null);
   const [draftGate, setDraftGate] = useState<'wait' | 'ask' | 'open'>('wait');
   const [notice, setNotice] = useState<string | null>(null);
+  // Короткая подсказка по действию; сама гаснет.
+  const [hint, setHint] = useState<string | null>(null);
+  useEffect(() => {
+    if (!hint) return;
+    const t = setTimeout(() => setHint(null), 4000);
+    return () => clearTimeout(t);
+  }, [hint]);
   useEffect(() => {
     if (draftGate !== 'wait' || !st.garments.length) return;
     const d = loadDraft();
@@ -218,7 +225,14 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [variant, garment, st.method, st.layers, st.quantities, st.fontTick]);
 
+  // Место под фото из готового принта, в которое встанет следующий выбранный файл.
+  const replaceId = useRef<string | null>(null);
+  const pickPhotoFor = (id: string) => { replaceId.current = id; fileRef.current?.click(); };
+  const pickFile = () => { replaceId.current = null; fileRef.current?.click(); };
+
   const onFile = (f?: File) => {
+    const slotId = replaceId.current;
+    replaceId.current = null;
     if (!f || !garment) return;
     const err = validateFile(f);
     setFileError(err);
@@ -227,6 +241,19 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
     const img = new window.Image();
     img.onload = () => {
       const isVector = f.type === 'image/svg+xml';
+      const slot = st.layers.find((l) => l.id === slotId);
+      if (slot?.kind === 'image' && slot.slot !== undefined) {
+        // Фото встаёт в окно шаблона: обрезаем по центру под пропорции окна, положение и размер слоя не меняются.
+        const [iw, ih] = [img.naturalWidth || 1000, img.naturalHeight || 1000];
+        const cw = Math.min(iw, ih / slot.slot);
+        const ch = cw * slot.slot;
+        const crop = { x: Math.round((iw - cw) / 2), y: Math.round((ih - ch) / 2), width: Math.round(cw), height: Math.round(ch) };
+        st.updateLayer(slot.id, {
+          src: url, fileName: f.name, isVector, naturalWidth: crop.width, naturalHeight: crop.height, crop, placeholder: false,
+        });
+        track('image_upload', { w: iw, h: ih, type: f.type, kb: Math.round(f.size / 1024), slot: true });
+        return;
+      }
       // Пустые поля по краям в размер принта не идут — обрезаем их сразу.
       const crop = contentBox(img) ?? undefined;
       const nw = crop?.width ?? (img.naturalWidth || 1000);
@@ -263,6 +290,14 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
   const hasDesign = st.layers.some((l) => sides.includes(l.side));
   const openOrder = () => {
     if (!hasDesign) return setTab('design');
+    // В готовом принте осталось пустое место под фото — в печать оно уйти не должно.
+    const empty = st.layers.find((l) => l.kind === 'image' && l.placeholder && sides.includes(l.side));
+    if (empty) {
+      st.setSide(empty.side);
+      st.selectLayer(empty.id);
+      setHint('Вставьте своё фото в рамку или удалите её.');
+      return;
+    }
     if (!price?.qty) { setTab('order'); return finishTo('order'); }
     setOrderOpen(true);
     track('order_form_open');
@@ -307,7 +342,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
         >
           <DesignStage
             apiRef={stageRef}
-            empty={{ onUpload: () => fileRef.current?.click(), dragging: dragOver }}
+            empty={{ onUpload: pickFile, dragging: dragOver }}
             zoom={zoom}
             onZoom={setZoom}
             focus={narrow && !!st.selectedLayerId}
@@ -387,8 +422,8 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
         {/* Дизайн: содержимое зависит от выбранного слоя */}
         <section className={s.section} data-section="design">
           <DesignPanel
-            stage={stageRef} fileError={fileError} onUpload={() => fileRef.current?.click()} onAddText={addText}
-            onTemplates={() => setTemplatesOpen(true)}
+            stage={stageRef} fileError={fileError} onUpload={pickFile} onAddText={addText}
+            onTemplates={() => setTemplatesOpen(true)} onReplacePhoto={pickPhotoFor}
           />
           {/* Телефон: слои — не отдельная вкладка, а короткий список под кнопками добавления */}
           {narrow && !selected && <LayersPanel embedded hex={hex} open onToggle={() => {}} />}
@@ -430,7 +465,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
           onContinue={() => { st.hydrate(draft); setDraft(null); setDraftGate('open'); }}
         />
       )}
-      {notice && <div className={s.notice} role="status">{notice}</div>}
+      {(hint ?? notice) && <div className={s.notice} role="status">{hint ?? notice}</div>}
       {templatesOpen && <TemplatePicker hex={hex} onClose={() => setTemplatesOpen(false)} />}
       {chartOpen && <SizeChart sizes={variant?.sizes ?? []} onClose={() => setChartOpen(false)} />}
       {orderOpen && garment && variant && price && (

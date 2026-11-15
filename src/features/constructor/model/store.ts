@@ -57,7 +57,7 @@ interface ConstructorState {
   addImage: (img: NewImage) => void;
   addText: (fill: string, text?: string) => void;
   /** Заменить слои текущей стороны слоями шаблона одним шагом истории; слои других сторон не меняются, выбор снимается. */
-  applyTemplate: (layers: Array<Omit<TextLayer, 'id' | 'side' | 'kind'>>) => void;
+  applyTemplate: (layers: Array<Omit<TextLayer, 'id' | 'side'> | Omit<ImageLayer, 'id' | 'side'>>) => void;
   updateLayer: (id: string, patch: Partial<DesignLayer>, mode?: HistoryMode) => void;
   removeLayer: (id: string) => void;
   duplicateLayer: (id: string) => void;
@@ -180,7 +180,7 @@ export const useConstructor = create<ConstructorState>((set, get) => {
         ...record(s),
         layers: [
           ...s.layers.filter((l) => l.side !== s.side),
-          ...layers.map((l) => ({ ...l, id: uid(), kind: 'text', side: s.side }) as TextLayer),
+          ...layers.map((l) => ({ ...l, id: uid(), side: s.side }) as DesignLayer),
         ],
         selectedLayerId: null,
       })),

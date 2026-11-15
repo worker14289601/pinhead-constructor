@@ -17,13 +17,15 @@ interface Props {
   onAddText: () => void;
   /** Открыть каталог готовых принтов; без пропа карточка «Готовые принты» не показывается. */
   onTemplates?: () => void;
+  /** Вставить своё фото в место под фото из готового принта (id слоя). */
+  onReplacePhoto?: (id: string) => void;
 }
 
 /**
  * Правая панель «Дизайн» зависит от выбора на холсте:
  * ничего не выбрано — три крупных входа (готовые принты, картинка, текст); текст — настройки текста; картинка — её параметры.
  */
-export function DesignPanel({ stage, fileError, onUpload, onAddText, onTemplates }: Props) {
+export function DesignPanel({ stage, fileError, onUpload, onAddText, onTemplates, onReplacePhoto }: Props) {
   const side = useConstructor((st) => st.side);
   const garment = useConstructor(selectGarment);
   const selected = useConstructor((st) => st.layers.find((l) => l.id === st.selectedLayerId));
@@ -93,7 +95,12 @@ export function DesignPanel({ stage, fileError, onUpload, onAddText, onTemplates
 
           {selected.kind === 'text' && <TextPanel layer={selected} />}
 
-          {selected.kind === 'image' && dpi !== null && (
+          {selected.kind === 'image' && selected.slot !== undefined && onReplacePhoto && (
+            <button type="button" className={selected.placeholder ? d.slotBtnMain : d.slotBtn} onClick={() => onReplacePhoto(selected.id)}>
+              <Icon name="upload" size={20} />{selected.placeholder ? 'Вставить своё фото' : 'Заменить фото'}
+            </button>
+          )}
+          {selected.kind === 'image' && !selected.placeholder && dpi !== null && (
             <p className={`${d.badge} ${dpi >= MIN_DPI ? '' : d.badgeWarn}`}>
               <Icon name={dpi >= MIN_DPI ? 'check' : 'alert'} size={18} />
               <span>
@@ -105,7 +112,7 @@ export function DesignPanel({ stage, fileError, onUpload, onAddText, onTemplates
               </span>
             </p>
           )}
-          {selected.kind === 'image' && selected.crop && (
+          {selected.kind === 'image' && selected.crop && selected.slot === undefined && (
             <p className={d.note}>Пустые поля по краям убрали — размер и цена считаются по самому рисунку.</p>
           )}
 

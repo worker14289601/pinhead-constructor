@@ -1,101 +1,238 @@
-import type { TextLayer } from '../model/types';
+import type { ImageLayer, TextLayer } from '../model/types';
+import { artAspect, artImage, photoPlaceholder, type ArtColors, type ArtId } from './template-art';
 
 /**
- * Готовые принты: наборы текстовых слоёв, которые одним нажатием заменяют дизайн текущей стороны.
- * Цвет в шаблоне не хранится: слой помечен тоном, а конкретный цвет выбирается по ткани (templateFill).
+ * Готовые принты: композиции из надписей, графики и мест под фото, которые одним нажатием
+ * заменяют дизайн текущей стороны.
+ *
+ * Координаты шаблона — в долях ШИРИНЫ композиции (ширина = 1, высота = height): так взаимное положение
+ * элементов не зависит от пропорций зоны печати. В доли зоны их переводит buildTemplate.
+ * Цвета в шаблоне не хранятся: элемент помечен тоном, цвет выбирается по ткани.
  */
-export type TemplateTone = 'main' | 'accent';
+export type TemplateTone = 'main' | 'accent' | 'dark' | 'white';
 
-/** Слой шаблона — текстовый слой без id, стороны и цвета; x/y — центр надписи в долях зоны печати. */
-export type TemplateLayer = Omit<TextLayer, 'id' | 'side' | 'kind' | 'fill'> & { tone: TemplateTone };
+/** Наклон элемента вместе с группой: поворот на deg вокруг точки (px, py). */
+type Tilt = { deg: number; px: number; py: number };
+
+interface TplText {
+  kind: 'text';
+  text: string;
+  font: string;
+  /** Кегль в долях ширины композиции. */
+  size: number;
+  /** Центр надписи. */
+  cx: number;
+  cy: number;
+  bold?: boolean;
+  italic?: boolean;
+  arc?: number;
+  lineHeight?: number;
+  tone?: TemplateTone;
+  tilt?: Tilt;
+}
+interface TplArt { kind: 'art'; art: ArtId; x: number; y: number; w: number; tilt?: Tilt }
+/** Место под фото клиента: aspect — высота в долях ширины. */
+interface TplPhoto { kind: 'photo'; x: number; y: number; w: number; aspect: number; tilt?: Tilt }
+type TplItem = TplText | TplArt | TplPhoto;
 
 export interface PrintTemplate {
   id: string;
   title: string;
-  category: string;
-  layers: TemplateLayer[];
+  category: (typeof TEMPLATE_CATEGORIES)[number];
+  /** Высота композиции в долях её ширины. */
+  height: number;
+  /** Элементы снизу вверх. */
+  items: TplItem[];
 }
 
-export const TEMPLATE_CATEGORIES = ['Команда', 'Праздник', 'Имя и номер', 'Надписи'] as const;
+export const TEMPLATE_CATEGORIES = ['С фото', 'Надписи', 'Команда', 'Праздник'] as const;
 
-/** Цвет слоя по тону и ткани: основной — светлый на тёмной ткани и тёмный на светлой; акцент — лайм или тёмно-зелёный. */
-export function templateFill(tone: TemplateTone, lightFabric: boolean): string {
-  if (tone === 'main') return lightFabric ? '#111111' : '#ffffff';
-  return lightFabric ? '#2f6b00' : '#99ff00';
+/** Слой, готовый к добавлению в дизайн: без id и стороны. */
+export type BuiltLayer = Omit<TextLayer, 'id' | 'side'> | Omit<ImageLayer, 'id' | 'side'>;
+
+const colors = (light: boolean): ArtColors => ({ ink: light ? '#111111' : '#ffffff', accent: light ? '#2f6b00' : '#99ff00', light });
+const fill = (tone: TemplateTone, c: ArtColors) =>
+  tone === 'accent' ? c.accent : tone === 'dark' ? '#111111' : tone === 'white' ? '#ffffff' : c.ink;
+
+/** Доля высоты зоны, которую может занять композиция, и отступ сверху у высокой зоны (в долях ширины). */
+const FILL = 0.9;
+const TOP = 0.1;
+
+/**
+ * Переводит шаблон в слои для зоны печати.
+ * aspect — высота зоны в долях её ширины; light — ткань светлая.
+ * Композиция вписывается в зону целиком: в низкой зоне (рукав, шоппер) уменьшается и встаёт по центру,
+ * в высокой — стоит сверху, на уровне груди.
+ */
+export function buildTemplate(tpl: PrintTemplate, aspect: number, light: boolean): BuiltLayer[] {
+  const c = colors(light);
+  const s = Math.min(FILL, (aspect * FILL) / tpl.height);
+  const x0 = (1 - s) / 2;
+  const y0 = Math.min(TOP, (aspect - tpl.height * s) / 2);
+  /** Точка композиции → доли зоны; с наклоном — после поворота вокруг опорной точки. */
+  const place = (x: number, y: number, tilt?: Tilt) => {
+    let [px, py] = [x, y];
+    if (tilt) {
+      const a = (tilt.deg * Math.PI) / 180;
+      const [dx, dy] = [x - tilt.px, y - tilt.py];
+      px = tilt.px + dx * Math.cos(a) - dy * Math.sin(a);
+      py = tilt.py + dx * Math.sin(a) + dy * Math.cos(a);
+    }
+    return { x: x0 + px * s, y: (y0 + py * s) / aspect };
+  };
+
+  return tpl.items.map((it): BuiltLayer => {
+    const rotation = it.tilt?.deg ?? 0;
+    if (it.kind === 'text') {
+      const color = fill(it.tone ?? 'main', c);
+      return {
+        kind: 'text', text: it.text, fontFamily: it.font, fontSize: it.size * s, fill: color, align: 'center',
+        bold: !!it.bold, italic: !!it.italic, lineHeight: it.lineHeight ?? 1.1, strokeWidth: 0,
+        strokeColor: color === '#ffffff' ? '#111111' : '#ffffff', arc: it.arc ?? 0, rotation, ...place(it.cx, it.cy, it.tilt),
+      };
+    }
+    // У картинки точка (x, y) — левый верхний угол, вокруг него она и поворачивается.
+    const pos = place(it.x, it.y, it.tilt);
+    if (it.kind === 'art') {
+      return { kind: 'image', ...artImage(it.art, c), fileName: 'Графика шаблона.svg', isVector: true, width: it.w * s, rotation, ...pos };
+    }
+    return {
+      kind: 'image', ...photoPlaceholder(it.aspect), fileName: 'Место под фото', isVector: true, width: it.w * s, rotation, ...pos,
+      slot: it.aspect, placeholder: true,
+    };
+  });
 }
 
-/** Слой с типовыми значениями; в шаблонах переопределяется только то, что отличается. */
-const t = (p: Pick<TemplateLayer, 'text' | 'fontFamily' | 'fontSize' | 'y'> & Partial<TemplateLayer>): TemplateLayer => ({
-  align: 'center', bold: false, italic: false, lineHeight: 1.1, strokeWidth: 0, strokeColor: '#000000',
-  arc: 0, x: 0.5, rotation: 0, tone: 'main', ...p,
-});
+/** Карточка моментального фото: рамка, место под снимок и подпись от руки. Ширина рамки — w. */
+const polaroid = (x: number, y: number, w: number, caption: string, deg = 0): TplItem[] => {
+  const tilt: Tilt = { deg, px: x + w / 2, py: y + (w * artAspect('polaroid')) / 2 };
+  return [
+    { kind: 'art', art: 'polaroid', x, y, w, tilt },
+    { kind: 'photo', x: x + w * 0.07, y: y + w * 0.07, w: w * 0.86, aspect: 1, tilt },
+    { kind: 'text', text: caption, font: 'Caveat', bold: true, size: w * 0.13, cx: x + w / 2, cy: y + w * 1.065, tone: 'dark', tilt },
+  ];
+};
 
 export const TEMPLATES: PrintTemplate[] = [
+  // ─── С фото ───
   {
-    id: 'team-word', title: 'Команда', category: 'Команда',
-    layers: [
-      t({ text: 'КОМАНДА', fontFamily: 'Unbounded', bold: true, fontSize: 0.13, y: 0.36 }),
-      t({ text: 'вместе мы сильнее', fontFamily: 'Montserrat', fontSize: 0.06, y: 0.5, tone: 'accent' }),
+    id: 'polaroid', title: 'Снимок с подписью', category: 'С фото', height: 1.02,
+    items: polaroid(0.1, 0.03, 0.8, 'лучший день', -4),
+  },
+  {
+    id: 'polaroid-duo', title: 'Было — стало', category: 'С фото', height: 0.92,
+    items: [...polaroid(0.02, 0.1, 0.52, 'было', -7), ...polaroid(0.46, 0.14, 0.52, 'стало', 6)],
+  },
+  {
+    id: 'player', title: 'Наша песня', category: 'С фото', height: 1.3,
+    items: [
+      { kind: 'photo', x: 0.1, y: 0, w: 0.8, aspect: 1 },
+      { kind: 'text', text: 'Наша песня', font: 'Montserrat', bold: true, size: 0.085, cx: 0.5, cy: 0.9 },
+      { kind: 'text', text: 'вместе с 2019 года', font: 'Montserrat', size: 0.045, cx: 0.5, cy: 0.99, tone: 'accent' },
+      { kind: 'art', art: 'player', x: 0.1, y: 1.07, w: 0.8 },
     ],
   },
   {
-    id: 'squad', title: 'Squad', category: 'Команда',
-    layers: [t({ text: 'SQUAD', fontFamily: 'Rubik Mono One', fontSize: 0.16, y: 0.4 })],
-  },
-  {
-    id: 'team-arc', title: 'Команда дугой', category: 'Команда',
-    layers: [
-      t({ text: 'НАША КОМАНДА', fontFamily: 'Montserrat', bold: true, fontSize: 0.07, y: 0.24, arc: 70 }),
-      t({ text: '2026', fontFamily: 'Unbounded', bold: true, fontSize: 0.2, y: 0.5, tone: 'accent' }),
+    id: 'film', title: 'Фотоплёнка', category: 'С фото', height: 1.56,
+    items: [
+      { kind: 'art', art: 'film', x: 0.25, y: 0, w: 0.5 },
+      ...[12, 70, 128].map((y): TplItem => ({ kind: 'photo', x: 0.25 + (0.5 * 8) / 60, y: (0.5 * y) / 60, w: (0.5 * 44) / 60, aspect: 46 / 44 })),
     ],
   },
   {
-    id: 'birthday-ru', title: 'С днём рождения', category: 'Праздник',
-    layers: [t({ text: 'С днём\nрождения', fontFamily: 'Lobster', fontSize: 0.13, y: 0.4, lineHeight: 1.05 })],
-  },
-  {
-    id: 'birthday-en', title: 'Happy Birthday', category: 'Праздник',
-    layers: [
-      t({ text: 'HAPPY\nBIRTHDAY', fontFamily: 'Russo One', fontSize: 0.13, y: 0.38, lineHeight: 1.05 }),
-      t({ text: 'make a wish', fontFamily: 'Caveat', bold: true, fontSize: 0.08, y: 0.6, tone: 'accent' }),
+    id: 'poster', title: 'Афиша', category: 'С фото', height: 1.42,
+    items: [
+      { kind: 'photo', x: 0.08, y: 0, w: 0.84, aspect: 1.15 },
+      { kind: 'text', text: 'ЛЕГЕНДА', font: 'Unbounded', bold: true, size: 0.125, cx: 0.5, cy: 1.09 },
+      { kind: 'art', art: 'rule', x: 0.08, y: 1.19, w: 0.84 },
+      { kind: 'text', text: 'ограниченный выпуск · 1 из 1', font: 'Montserrat', size: 0.042, cx: 0.5, cy: 1.26, tone: 'accent' },
+      { kind: 'art', art: 'barcode', x: 0.33, y: 1.32, w: 0.34 },
     ],
   },
   {
-    id: 'name-number', title: 'Имя и номер', category: 'Имя и номер',
-    layers: [
-      t({ text: 'ИВАНОВ', fontFamily: 'Oswald', bold: true, fontSize: 0.14, y: 0.2 }),
-      t({ text: '10', fontFamily: 'Oswald', bold: true, fontSize: 0.5, y: 0.52, tone: 'accent' }),
+    id: 'best-dad', title: 'Лучший папа', category: 'С фото', height: 1.3,
+    items: [
+      { kind: 'text', text: 'ЛУЧШИЙ ПАПА', font: 'Russo One', size: 0.1, cx: 0.5, cy: 0.12, arc: 55 },
+      { kind: 'photo', x: 0.18, y: 0.24, w: 0.64, aspect: 1.2 },
+      { kind: 'text', text: 'на свете с 2015 года', font: 'Caveat', bold: true, size: 0.08, cx: 0.5, cy: 1.12, tone: 'accent' },
+    ],
+  },
+
+  // ─── Надписи ───
+  {
+    id: 'label', title: 'Этикетка', category: 'Надписи', height: 1.19,
+    items: [
+      { kind: 'art', art: 'label', x: 0.05, y: 0, w: 0.9 },
+      { kind: 'text', text: 'СОСТАВ', font: 'Oswald', bold: true, size: 0.1, cx: 0.5, cy: 0.135 },
+      { kind: 'text', text: '100%\nДРУГ', font: 'Rubik Mono One', size: 0.15, cx: 0.5, cy: 0.52, lineHeight: 1.15 },
+      { kind: 'text', text: 'юмор · забота · терпение', font: 'Montserrat', size: 0.042, cx: 0.5, cy: 0.79, tone: 'accent' },
+      { kind: 'art', art: 'barcode', x: 0.2, y: 0.93, w: 0.6 },
+      { kind: 'text', text: 'не кантовать · беречь', font: 'Montserrat', bold: true, size: 0.034, cx: 0.5, cy: 1.125 },
     ],
   },
   {
-    id: 'name-number-arc', title: 'Имя дугой и номер', category: 'Имя и номер',
-    layers: [
-      t({ text: 'SMIRNOV', fontFamily: 'Montserrat', bold: true, fontSize: 0.09, y: 0.2, arc: 60 }),
-      t({ text: '07', fontFamily: 'Russo One', fontSize: 0.42, y: 0.5, tone: 'accent' }),
+    id: 'established', title: 'Год основания', category: 'Надписи', height: 0.66,
+    items: [
+      { kind: 'art', art: 'rule', x: 0.1, y: 0.02, w: 0.8 },
+      { kind: 'text', text: 'ОСНОВАНО В', font: 'Oswald', bold: true, size: 0.065, cx: 0.5, cy: 0.12 },
+      { kind: 'text', text: '1996', font: 'Playfair Display', bold: true, size: 0.3, cx: 0.5, cy: 0.35, tone: 'accent' },
+      { kind: 'text', text: 'САНКТ-ПЕТЕРБУРГ', font: 'Oswald', size: 0.055, cx: 0.5, cy: 0.56 },
+      { kind: 'art', art: 'rule', x: 0.1, y: 0.63, w: 0.8 },
     ],
   },
   {
-    id: 'founded', title: 'Год основания', category: 'Надписи',
-    layers: [
-      t({ text: 'ОСНОВАНО В', fontFamily: 'Montserrat', bold: true, fontSize: 0.05, y: 0.3 }),
-      t({ text: '2026', fontFamily: 'Playfair Display', bold: true, fontSize: 0.24, y: 0.43, tone: 'accent' }),
+    id: 'with-love', title: 'Сделано с любовью', category: 'Надписи', height: 0.5,
+    items: [
+      { kind: 'text', text: 'сделано\nс любовью', font: 'Marck Script', size: 0.16, cx: 0.5, cy: 0.2, lineHeight: 1 },
+      { kind: 'art', art: 'heart', x: 0.44, y: 0.4, w: 0.12 },
+    ],
+  },
+
+  // ─── Команда ───
+  {
+    id: 'emblem', title: 'Эмблема', category: 'Команда', height: 0.84,
+    items: [
+      { kind: 'art', art: 'ring', x: 0.08, y: 0, w: 0.84 },
+      { kind: 'text', text: 'НАША КОМАНДА', font: 'Oswald', bold: true, size: 0.075, cx: 0.5, cy: 0.155, arc: 78 },
+      { kind: 'art', art: 'star', x: 0.43, y: 0.28, w: 0.14 },
+      { kind: 'text', text: 'НК', font: 'Unbounded', bold: true, size: 0.15, cx: 0.5, cy: 0.5 },
+      { kind: 'text', text: 'С 2026 ГОДА', font: 'Oswald', bold: true, size: 0.06, cx: 0.5, cy: 0.69, arc: -62 },
     ],
   },
   {
-    id: 'slogan-ru', title: 'Делаем с душой', category: 'Надписи',
-    layers: [t({ text: 'Делаем\nс душой', fontFamily: 'Caveat', bold: true, fontSize: 0.17, y: 0.4, lineHeight: 1 })],
-  },
-  {
-    id: 'hello-summer', title: 'Hello, summer', category: 'Надписи',
-    layers: [
-      t({ text: 'Hello,\nsummer', fontFamily: 'Lobster', fontSize: 0.15, y: 0.38, lineHeight: 1.05, rotation: -6 }),
+    id: 'player-number', title: 'Игрок и номер', category: 'Команда', height: 0.86,
+    items: [
+      { kind: 'text', text: 'ИВАНОВ', font: 'Oswald', bold: true, size: 0.13, cx: 0.5, cy: 0.1, arc: 40 },
+      { kind: 'text', text: '10', font: 'Russo One', size: 0.5, cx: 0.5, cy: 0.47 },
+      { kind: 'art', art: 'stripes', x: 0.2, y: 0.78, w: 0.6 },
     ],
   },
   {
-    id: 'limited', title: 'Limited edition', category: 'Надписи',
-    layers: [
-      t({ text: 'LIMITED EDITION', fontFamily: 'Montserrat', bold: true, fontSize: 0.065, y: 0.24, arc: 70 }),
-      t({ text: '№001', fontFamily: 'Oswald', bold: true, fontSize: 0.22, y: 0.48, tone: 'accent' }),
+    id: 'crew', title: 'Свои люди', category: 'Команда', height: 0.46,
+    items: [
+      { kind: 'art', art: 'stripes', x: 0.3, y: 0, w: 0.4 },
+      { kind: 'text', text: 'СВОИ ЛЮДИ', font: 'Rubik Mono One', size: 0.105, cx: 0.5, cy: 0.19 },
+      { kind: 'text', text: 'команда · сезон 2026', font: 'Montserrat', size: 0.048, cx: 0.5, cy: 0.34, tone: 'accent' },
+    ],
+  },
+
+  // ─── Праздник ───
+  {
+    id: 'birthday-number', title: 'Юбилей', category: 'Праздник', height: 0.82,
+    items: [
+      { kind: 'text', text: 'с днём рождения', font: 'Lobster', size: 0.095, cx: 0.5, cy: 0.07 },
+      { kind: 'text', text: '30', font: 'Unbounded', bold: true, size: 0.42, cx: 0.5, cy: 0.39, tone: 'accent' },
+      { kind: 'art', art: 'rule', x: 0.2, y: 0.63, w: 0.6 },
+      { kind: 'text', text: 'и это только начало', font: 'Montserrat', bold: true, size: 0.05, cx: 0.5, cy: 0.72 },
+    ],
+  },
+  {
+    id: 'graduate', title: 'Выпуск', category: 'Праздник', height: 0.7,
+    items: [
+      { kind: 'art', art: 'star', x: 0.44, y: 0, w: 0.12 },
+      { kind: 'text', text: 'ВЫПУСК', font: 'Russo One', size: 0.17, cx: 0.5, cy: 0.25 },
+      { kind: 'text', text: '2026', font: 'Russo One', size: 0.17, cx: 0.5, cy: 0.44, tone: 'accent' },
+      { kind: 'text', text: '11 «А» · мы это сделали', font: 'Caveat', bold: true, size: 0.075, cx: 0.5, cy: 0.62 },
     ],
   },
 ];

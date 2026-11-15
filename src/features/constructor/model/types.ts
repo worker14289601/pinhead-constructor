@@ -99,6 +99,10 @@ export interface ImageLayer extends LayerBase {
   /** Видимая часть исходной картинки без пустых полей (пиксели исходника). Нет — картинка целиком. */
   crop?: import('./trim').CropRect;
   width: number; // доля ширины зоны печати
+  /** Место под фото из готового принта: пропорции окна (высота в долях ширины). Новое фото обрезается под них. */
+  slot?: number;
+  /** В месте под фото пока стоит заглушка — клиент ещё не вставил свой снимок. */
+  placeholder?: boolean;
 }
 
 export interface TextLayer extends LayerBase {
