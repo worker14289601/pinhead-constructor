@@ -12,13 +12,8 @@ const nextConfig = {
     config.externals = [...config.externals, { canvas: 'canvas' }];
     return config;
   },
-  images: {
-    unoptimized: staticExport,
-    remotePatterns: [
-      { protocol: 'https', hostname: 'cdn.pnhd.ru', pathname: '/**' },
-      { protocol: 'https', hostname: 'api.pnhd.ru', pathname: '/**' },
-    ],
-  },
+  // next/image не используется: оптимизатор картинок (/_next/image) выключен, чтобы не держать лишний эндпоинт.
+  images: { unoptimized: true },
 };
 
 export default nextConfig;
