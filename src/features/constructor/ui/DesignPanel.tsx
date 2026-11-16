@@ -76,7 +76,7 @@ export function DesignPanel({ stage, fileError, onUpload, onAddText, onTemplates
     <>
       {!selected && !group ? (
         <>
-          <h3 className={s.h}>Принт · {SIDE_LABEL[side]}</h3>
+          <h3 className={s.h}><span className={s.hNum} aria-hidden>2</span>Принт · {SIDE_LABEL[side]}</h3>
           <div className={d.actions}>
             {/* Главная карточка во всю ширину сверху, две остальные — в ряд под ней */}
             <button type="button" className={d.cardPrimary} onClick={onUpload}>

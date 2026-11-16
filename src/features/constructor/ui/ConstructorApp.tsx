@@ -1,6 +1,6 @@
 'use client';
 import dynamic from 'next/dynamic';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchCatalog } from '../api/catalog';
 import { track } from '../analytics/events';
 import { getUtm } from '../analytics/utm';
@@ -32,6 +32,7 @@ import { LayersPanel } from './LayersPanel';
 import { OrderForm } from './OrderForm';
 import { OrderFooter, OrderPanel } from './OrderPanel';
 import { SizeChart } from './SizeChart';
+import { StepGuide, type GuideStep } from './StepGuide';
 import { TemplatePicker } from './TemplatePicker';
 import s from './constructor.module.css';
 
@@ -358,6 +359,44 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
   const methodName = METHOD_INFO[st.method].title.split(/\s+[—–-]\s+/)[0];
 
   const hasDesign = st.layers.some((l) => sides.includes(l.side));
+
+  // Шаги сверху: первый пройден, когда посетитель сам выбрал вещь или цвет (или уже нанёс принт).
+  const firstPick = useRef<string | null>(null);
+  const [picked, setPicked] = useState(false);
+  useEffect(() => {
+    if (!st.garmentId || !st.variantId) return;
+    const key = `${st.garmentId}|${st.variantId}`;
+    if (firstPick.current === null) firstPick.current = key;
+    else if (firstPick.current !== key) setPicked(true);
+  }, [st.garmentId, st.variantId]);
+  const guideActive: GuideStep = hasDesign ? 3 : picked ? 2 : 1;
+  // Баннер сворачивается один раз: если потом отменить единственное действие, страница не прыгает обратно.
+  // С небольшой паузой: сразу после выбора цвета или вещи холст перекрашивает изделие и на миг подвисает —
+  // анимация, начатая в этот момент, дёргается.
+  const [started, setStarted] = useState(false);
+  useEffect(() => {
+    if (started || !(picked || hasDesign)) return;
+    const t = setTimeout(() => setStarted(true), 350);
+    return () => clearTimeout(t);
+  }, [started, picked, hasDesign]);
+  const leftRef = useRef<HTMLElement>(null);
+  const designRef = useRef<HTMLElement>(null);
+  const flashTimer = useRef<ReturnType<typeof setTimeout>>();
+  const flash = (el: HTMLElement | null) => {
+    if (!el) return;
+    clearTimeout(flashTimer.current);
+    appRef.current?.querySelectorAll<HTMLElement>('[data-flash]').forEach((x) => { delete x.dataset.flash; });
+    void el.offsetWidth; // перезапуск подсветки при повторном нажатии
+    el.dataset.flash = '';
+    flashTimer.current = setTimeout(() => { delete el.dataset.flash; }, 1400);
+  };
+  const showStep = (n: GuideStep) => {
+    if (n === 1) { leftRef.current?.scrollTo({ top: 0, behavior: 'smooth' }); return flash(leftRef.current); }
+    st.selectLayer(null);
+    const el = n === 2 ? designRef : orderRef;
+    if (n === 3) setTab('order');
+    requestAnimationFrame(() => { el.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); flash(el.current); });
+  };
   const openOrder = () => {
     if (!hasDesign) return setTab('design');
     // В готовом принте осталось пустое место под фото — в печать оно уйти не должно.
@@ -378,9 +417,11 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
       ref={appRef} className={s.app} data-tab={tab} data-editing={selected || st.selectedGroup ? '' : undefined} data-kb={kb ? '' : undefined}
       data-sheet={sheetFull ? 'full' : undefined}
     >
+      <StepGuide big={!started} active={guideActive} done={(n) => (n === 1 ? picked || hasDesign : n === 2 && hasDesign)} onStep={showStep} />
+
       {/* Изделие */}
-      <section className={`${s.panel} ${s.left}`} data-section="garment">
-        <h3 className={s.h}>Изделие</h3>
+      <section ref={leftRef} className={`${s.panel} ${s.left}`} data-section="garment">
+        <h3 className={s.h}><span className={s.hNum} aria-hidden>1</span>Изделие</h3>
         {error && <p className={s.err}>{error}</p>}
         {!st.garments.length && !error && <p className={s.muted}>Загружаем каталог…</p>}
         <GarmentPicker
@@ -462,7 +503,11 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
       <nav className={s.steps} aria-label="Шаги">
         {STEPS.map(([id, label], i) => {
           const done = id === 'garment' ? tab !== 'garment' || hasDesign : id === 'design' ? hasDesign : !!price?.qty;
+          const prev = STEPS[i - 1]?.[0];
+          const prevDone = prev === 'garment' ? tab !== 'garment' || hasDesign : prev === 'design' && hasDesign;
           return (
+            <Fragment key={id}>
+            {i > 0 && <span className={s.stepLine} data-done={prevDone ? '' : undefined} aria-hidden />}
             <button
               key={id} type="button" className={tab === id ? s.stepActive : s.step}
               aria-current={tab === id ? 'step' : undefined} data-done={done ? '' : undefined} onClick={() => setTab(id)}
@@ -470,6 +515,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
               <span className={s.stepNum}>{done && tab !== id ? <Icon name="checkMark" size={14} /> : i + 1}</span>
               {label}
             </button>
+            </Fragment>
           );
         })}
       </nav>
@@ -491,7 +537,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
 
       <aside className={`${s.panel} ${s.right}`} data-editing={selected || st.selectedGroup ? '' : undefined}>
         {/* Дизайн: содержимое зависит от выбранного слоя */}
-        <section className={s.section} data-section="design">
+        <section ref={designRef} className={s.section} data-section="design">
           <DesignPanel
             stage={stageRef} fileError={fileError} onUpload={pickFile} onAddText={addText}
             onTemplates={() => setTemplatesOpen(true)} onReplacePhoto={pickPhotoFor} onMaskText={setMaskText}

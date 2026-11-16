@@ -8,6 +8,8 @@
   text-align: left; cursor: pointer; font: inherit; color: var(--ink);
   transition: background-color var(--t-fast, .32s);
 }
+/* Малые плитки — от верха: значок и заголовок в одну линию, даже если у соседней есть подпись */
+.card { justify-content: flex-start; }
 .card:hover { background: var(--lime-soft); }
 /* Главная — на всю ширину, значок слева от текста */
 .cardPrimary {

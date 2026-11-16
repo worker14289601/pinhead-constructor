@@ -73,7 +73,7 @@ export function OrderPanel({ variant, price, onSizeChart }: {
       <div className={o.card}><p>{METHOD_INFO[method].hint}</p></div>
 
       <div className={o.subRow}>
-        <h3 className={s.h} style={{ margin: 0 }}>Размеры</h3>
+        <h3 className={s.h} style={{ margin: 0 }}><span className={s.hNum} aria-hidden>3</span>Размеры</h3>
         {SIZE_CHART.some((r) => variant?.sizes.includes(r.size)) && (
           <button type="button" className={o.chartLink} onClick={onSizeChart}>
             <Icon name="ruler" size={16} />Таблица размеров

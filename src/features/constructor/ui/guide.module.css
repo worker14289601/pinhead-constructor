@@ -1,0 +1,87 @@
+/*
+ * Шаги над конструктором (ui/StepGuide.tsx). Только десктоп: на телефоне свои вкладки-шаги.
+ * Графитовая плашка с лаймом — как итог с ценой внизу справа. Внутри два готовых слоя: крупный баннер
+ * для первого захода и тонкая полоса. Смена — только высота и прозрачность, раскладка слоёв не меняется.
+ */
+.guide {
+  --off: rgb(255 255 255 / .5);
+  --fold: .75s cubic-bezier(.45, 0, .2, 1);
+  grid-area: guide; display: grid; min-width: 0; overflow: hidden;
+  border-radius: var(--r-card); background: var(--graphite); color: #fff;
+  animation: guideIn .5s cubic-bezier(.22, .61, .36, 1) backwards;
+}
+
+/* Слой схлопывается по высоте (0fr) и гаснет; оба слоя меняются одновременно, так что высота плашки
+   плавно перетекает от баннера к полосе. */
+.layerBig, .layerStrip { display: grid; min-width: 0; transition: grid-template-rows var(--fold), opacity .4s ease, visibility 0s; }
+.layerInner { min-height: 0; overflow: hidden; }
+.layerBig { grid-template-rows: 0fr; opacity: 0; visibility: hidden; pointer-events: none; transition-delay: 0s, 0s, .75s; }
+.guide[data-big] .layerBig { grid-template-rows: 1fr; opacity: 1; visibility: visible; pointer-events: auto; transition-delay: 0s, 0s, 0s; }
+/* Полоса проявляется, когда баннер уже почти погас */
+.layerStrip { grid-template-rows: 1fr; opacity: 1; transition-delay: 0s, .3s, 0s; }
+.guide[data-big] .layerStrip { grid-template-rows: 0fr; opacity: 0; visibility: hidden; pointer-events: none; transition-delay: 0s, 0s, .75s; }
+/* Содержимое баннера при уходе чуть поднимается — читается как «свернулось вверх» */
+.banner { transition: translate var(--fold); }
+.guide:not([data-big]) .banner { translate: 0 -12px; }
+
+/* ─── Баннер ─── */
+.banner { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.title { margin: 0; font-family: var(--font-head); font-size: var(--fs-lg); font-weight: 700; text-transform: uppercase; letter-spacing: .02em; line-height: 1.1; }
+.cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.cardItem { display: flex; min-width: 0; }
+/* Карточки одной высоты, содержимое от верха — даже если пояснение где-то в две строки */
+.card {
+  flex: 1; display: flex; align-items: flex-start; gap: 12px; min-width: 0; padding: 14px; border: 0; border-radius: var(--r-lg);
+  background: rgb(255 255 255 / .08); color: #fff !important; text-align: left; cursor: pointer;
+  transition: background-color var(--t-fast) var(--ease-out);
+}
+.card:hover { background: rgb(255 255 255 / .14); }
+.card[data-active] { background: var(--lime); color: var(--ink) !important; }
+.card[data-active]:hover { background: #8aea00; }
+.cardNum {
+  flex: none; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%;
+  background: #fff; color: var(--ink); font-size: var(--fs-md); font-weight: 800; font-variant-numeric: tabular-nums;
+}
+.card[data-active] .cardNum { background: var(--ink); color: #fff; }
+.cardText { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.cardTitle { font-family: var(--font-head); font-size: var(--fs-md); font-weight: 700; text-transform: uppercase; letter-spacing: .02em; line-height: 1.25; }
+.cardNote { font-size: var(--fs-xs); line-height: 1.35; color: rgb(255 255 255 / .7); }
+.card[data-active] .cardNote { color: rgb(0 0 0 / .7); }
+
+/* ─── Полоса: [1]——[2]——[3], линии от шага до шага, последний шаг у правого края ─── */
+.strip { display: flex; margin: 0; padding: 6px; list-style: none; min-width: 0; }
+.item { flex: 1 1 0; display: flex; align-items: center; min-width: 0; }
+.item:first-child { flex: 0 0 auto; }
+.line { flex: 1 1 auto; min-width: 24px; height: 2px; margin: 0 4px; border-radius: 1px; background: rgb(255 255 255 / .18); transition: background-color var(--t-base) var(--ease-out); }
+.line[data-done] { background: var(--lime); }
+.step {
+  flex: none; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 6px 14px 6px 6px; border: 0; border-radius: var(--r-lg);
+  background: transparent; cursor: pointer; text-align: left; color: var(--off) !important;
+  transition: background-color var(--t-fast) var(--ease-out), color var(--t-fast) var(--ease-out);
+}
+.step:hover { background: rgb(255 255 255 / .1); }
+.step[data-done] { color: #fff !important; }
+/* Текущий шаг — лаймовая плашка: сразу видно, что делать сейчас */
+.step[data-active] { background: var(--lime); color: var(--ink) !important; }
+.step[data-active]:hover { background: #8aea00; }
+.num {
+  flex: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%;
+  background: rgb(255 255 255 / .12); color: var(--off); font-size: var(--fs-sm); font-weight: 800; font-variant-numeric: tabular-nums;
+  transition: background-color var(--t-base) var(--ease-out), color var(--t-base) var(--ease-out);
+}
+.step[data-done] .num { background: var(--lime); color: var(--ink); }
+.step[data-active] .num { background: var(--ink); color: #fff; }
+.stepTitle { font-size: var(--fs-sm); font-weight: 700; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+@keyframes guideIn { from { opacity: 0; translate: 0 -6px; } }
+
+@media (max-width: 1200px) and (min-width: 901px) {
+  .banner { padding: 12px; gap: 10px; }
+  .card { padding: 12px; }
+  .cardTitle { font-size: var(--fs-sm); }
+  .title { font-size: var(--fs-md); }
+}
+@media (max-width: 900px) { .guide { display: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .guide, .layerBig, .layerStrip, .banner, .card, .step, .num, .line { transition: none; animation: none; }
+}

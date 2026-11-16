@@ -29,6 +29,8 @@
   transition: background-color var(--t-fast);
 }
 .chartLink:hover { background: var(--lime-soft); }
+/* Общий шрифт кнопок на десктопе крупнее: рядом с номером шага заголовок и ссылка иначе не помещаются в узкую колонку */
+@media (min-width: 901px) { .subRow .chartLink { font-size: var(--fs-sm); } }
 /* Две плитки в ряд: кнопки степпера 44 px, между ними число — случайно не нажать */
 .sizes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .size, .sizeActive {

@@ -33,9 +33,9 @@
 
   display: grid;
   grid-template-columns: 290px minmax(0, 1fr) 350px;
-  grid-template-areas: 'left center right';
-  /* Единственная строка ровно во всю высоту: без minmax(0, 1fr) длинная панель растягивает ряд и страницу */
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: 'guide guide guide' 'left center right';
+  /* Сверху шаги, ниже колонки ровно в остаток высоты: без minmax(0, 1fr) длинная панель растягивает ряд и страницу */
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 12px;
   padding: 12px;
   box-sizing: border-box;
@@ -91,6 +91,15 @@
   text-transform: uppercase; letter-spacing: .02em; color: var(--ink);
 }
 .muted { color: var(--muted); font-size: 13px; margin: 0; }
+/* Номер шага в заголовке колонки — тот же, что в полосе шагов сверху */
+.hNum {
+  display: inline-grid; place-items: center; width: 20px; height: 20px; margin-right: 8px; vertical-align: 1px; border-radius: 50%;
+  background: var(--ink); color: #fff; font-family: var(--font-body); font-size: 11px; font-weight: 800; letter-spacing: 0;
+}
+.h:has(> .hNum) { white-space: nowrap; }
+/* Колонка, на которую указали из полосы шагов: коротко подсвечивается (внутренней рамкой — панели обрезают внешнюю) */
+.app [data-flash] { animation: flash 1.4s var(--ease-out); }
+@keyframes flash { 0%, 50% { box-shadow: inset 0 0 0 4px var(--lime); } 100% { box-shadow: inset 0 0 0 4px transparent; } }
 .err { color: var(--danger); font-size: 13px; margin: 0; }
 .warn { color: #6b4300; background: #fff1d6; border: 1px solid #e0a83a; border-radius: var(--r-ctl); padding: 8px 10px; font-size: 13px; margin: 0; }
 .stub { color: var(--muted); }
@@ -182,7 +191,7 @@
 
 /* Размеры */
 
-/* Итог — графитовая плашка, как тёмные карточки сайта */
+/* Итог — графитовая плашка, как тёмные карточки сайта и полоса шагов сверху */
 .footer {
   margin-top: auto; position: sticky; bottom: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
   padding: 16px 20px; background: var(--graphite); color: #fff;
@@ -243,23 +252,29 @@
   /* Пока открыта клавиатура — во всю видимую область над ней. */
   .app[data-kb] { height: var(--vvh, 100dvh); }
 
-  /* Шаги: номер в кружке и подпись; пройденный — с галочкой, текущий — тёмный кружок. */
+  /* Шаги — графитовая полоса, как на десктопе: текущий шаг на лаймовой плашке, пройденный — с лаймовой
+     галочкой, линии от шага к шагу (пройденная — лаймовая). */
   .steps {
-    grid-area: steps; display: grid; grid-template-columns: repeat(3, 1fr); background: #fff;
-    padding: max(4px, env(safe-area-inset-top)) 8px 0; border-bottom: 1px solid var(--line); z-index: 2;
+    grid-area: steps; display: flex; align-items: center; z-index: 2;
+    margin: max(6px, env(safe-area-inset-top)) 8px 0; padding: 4px; border-radius: var(--r-lg); background: var(--graphite);
   }
+  .stepLine { flex: 1 1 auto; min-width: 8px; height: 2px; margin: 0 2px; border-radius: 1px; background: rgb(255 255 255 / .18); transition: background-color var(--t-base) var(--ease-out); }
+  .stepLine[data-done] { background: var(--lime); }
   .step, .stepActive {
-    position: relative; display: flex; align-items: center; justify-content: center; gap: 6px; min-height: var(--tap);
-    padding: 0 2px; border: 0; background: none; cursor: pointer; font-size: var(--fs-sm); font-weight: 700; color: var(--muted);
+    flex: none; display: flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 12px 0 6px; border: 0; border-radius: 12px;
+    background: transparent; cursor: pointer; font-size: var(--fs-sm); font-weight: 700; color: rgb(255 255 255 / .55);
+    transition: background-color var(--t-fast) var(--ease-out), color var(--t-fast) var(--ease-out);
   }
-  .stepActive { color: var(--ink) !important; }
-  .stepActive::after { content: ''; position: absolute; left: 12px; right: 12px; bottom: -1px; height: 2px; border-radius: 1px; background: var(--ink); }
+  .step[data-done] { color: #fff; }
+  .stepActive { background: var(--lime); color: var(--ink) !important; }
   .stepNum {
-    flex: none; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%;
-    background: var(--surface); color: var(--muted); font-size: var(--fs-xs); font-weight: 800; font-variant-numeric: tabular-nums;
+    flex: none; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%;
+    background: rgb(255 255 255 / .12); color: rgb(255 255 255 / .55); font-size: var(--fs-xs); font-weight: 800; font-variant-numeric: tabular-nums;
+    transition: background-color var(--t-base) var(--ease-out), color var(--t-base) var(--ease-out);
   }
-  .stepActive .stepNum { background: var(--ink); color: #fff; }
   .step[data-done] .stepNum { background: var(--lime); color: var(--ink); }
+  .stepActive .stepNum { background: var(--ink); color: #fff; }
+  .steps { min-width: 0; }
 
   .center {
     height: 46dvh; gap: 6px; padding: 6px 8px 4px;
@@ -347,6 +362,14 @@
   .chart { font-size: 13px; }
   .check { font-size: 12px; }
   .btn { padding: 10px 10px; }
+}
+
+/* Узкий телефон (до 360 px): полоса шагов компактнее, чтобы три шага с линиями поместились в ширину */
+@media (max-width: 360px) {
+  .steps { padding: 3px; margin-left: 6px; margin-right: 6px; }
+  .step, .stepActive { gap: 4px; padding: 0 8px 0 4px; font-size: var(--fs-xs); }
+  .stepNum { width: 22px; height: 22px; }
+  .stepLine { min-width: 4px; margin: 0 1px; }
 }
 
 /* Телефон боком: холст слева, панель справа — иначе на холст остаётся полоска в треть экрана. */
