@@ -1,0 +1,31 @@
+/*
+ * Уведомление о cookie на стенде. Лежит вне конструктора, поэтому его переменные (.app) здесь не видны:
+ * значения повторяют шкалу конструктора (constructor.module.css) — при её изменении поправить и тут.
+ */
+.notice {
+  --lime: #99ff00;
+  --graphite: #393939;
+  --fs-sm: 14px;
+  --r-lg: 16px;
+  --r-sm: 8px;
+  --tap: 44px;
+
+  position: fixed; z-index: 1000; left: 12px; bottom: 12px; width: min(420px, calc(100vw - 24px)); box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 12px; padding: 16px;
+  background: var(--graphite); color: #fff; border-radius: var(--r-lg);
+  font-family: Neue_machina, var(--pnhd-font-body-fallback, Arial), Helvetica, sans-serif; font-size: var(--fs-sm); line-height: 1.4;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .28);
+  animation: in .52s cubic-bezier(.4, 0, .2, 1) backwards;
+}
+.text { margin: 0; }
+.text a { color: inherit; text-decoration: underline; }
+.actions { display: flex; gap: 8px; }
+.actions button {
+  flex: 1; min-height: var(--tap); padding: 0 14px; border-radius: var(--r-sm); border: 1px solid transparent;
+  font: inherit; cursor: pointer;
+}
+.ok { background: var(--lime); color: #000; }
+.ghost { background: transparent; color: #fff; border-color: rgba(255, 255, 255, .45) !important; }
+.actions button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+@keyframes in { from { opacity: 0; transform: translateY(12px); } }
+@media (prefers-reduced-motion: reduce) { .notice { animation: none; } }

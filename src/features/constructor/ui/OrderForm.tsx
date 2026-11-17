@@ -3,10 +3,12 @@ import { useEffect, useRef, useState, type RefObject } from 'react';
 import { track, trackPurchase } from '../analytics/events';
 import { getUtm } from '../analytics/utm';
 import type { PriceBreakdown } from '../model/pricing';
-import { useConstructor } from '../model/store';
+import { overflowingLayers, useConstructor } from '../model/store';
+import { sideHasLayers, visibleLayers } from '../model/visibility';
 import { sidesFor } from '../config/print-areas';
 import { METHOD_INFO } from '../config/pricing';
 import { PICKUP } from '../config/pickup';
+import { POLICY_URL } from '../config/legal';
 import { SIDE_LABEL, SIDE_TAB, type Garment, type GarmentVariant, type OrderContacts, type Side } from '../model/types';
 import type { DesignStageHandle } from '../canvas/DesignStage';
 import { buildOrderPdf } from '../pdf/orderPdf';
@@ -86,6 +88,9 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
   const [shot, setShot] = useState(0);
   const [zoomed, setZoomed] = useState(false);
   const started = useRef(false);
+  // Номер заказа живёт, пока открыта форма: повторная отправка после сбоя идёт с тем же номером,
+  // и сервер узнаёт в ней ту же заявку, а не создаёт вторую.
+  const issued = useRef('');
   const touchX = useRef(0); // свайп в увеличенном просмотре
   // Снимки по цветам: клик по строке цвета в сводке показывает превью этого цвета.
   const [active, setActive] = useState(variant.productId);
@@ -94,7 +99,7 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
     const cached = cache.current.get(productId);
     if (cached) { setShots(cached); return; }
     setCapturing(true);
-    const sides = sidesFor(garment).filter((sd) => layers.some((l) => l.side === sd));
+    const sides = sidesFor(garment).filter((sd) => sideHasLayers(layers, sd));
     const out: Array<{ side: Side; src: string }> = [];
     stage.current?.setTurnEnabled(false);
     try {
@@ -185,20 +190,23 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (capturing) return; // холст ещё перебирает стороны для превью
+    // Страховка: с принтом за границей зоны форма не открывается, но и отправить такую заявку нельзя.
+    if (overflowingLayers(useConstructor.getState()).length) { setState('error'); return; }
     setState('sending');
     track('order_send', { total: price.total, qty: price.qty });
     try {
       // Номер выдаёт сервер до отправки: он нужен в PDF, который уходит вместе с заявкой.
-      let number = demoNumber();
-      if (endpoint) {
+      let number = issued.current || demoNumber();
+      if (endpoint && !issued.current) {
         const numRes = await fetch(`${endpoint}/number`, { method: 'POST' });
         number = numRes.ok ? String((await numRes.json()).number ?? '') : '';
         if (!number) throw new Error(`number_${numRes.status}`);
       }
+      issued.current = number;
 
       // Снимаем превью по каждому цвету и стороне с принтом; файл печати от цвета ткани не зависит — один на сторону.
       const form = new FormData();
-      const sides = sidesFor(garment).filter((sd) => layers.some((l) => l.side === sd));
+      const sides = sidesFor(garment).filter((sd) => sideHasLayers(layers, sd));
       const previews: Array<{ color: string; side: Side; dataUrl: string }> = [];
       const original = { side, variantId: variant.productId };
       stage.current?.setTurnEnabled(false);
@@ -230,7 +238,7 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
 
       // Исходные файлы клиента — как загружены, без пересжатия (один файл — один раз, даже если слоёв несколько).
       const images = new Map<string, string>();
-      for (const l of layers) if (l.kind === 'image' && sides.includes(l.side)) images.set(l.src, l.fileName);
+      for (const l of visibleLayers(layers)) if (l.kind === 'image' && sides.includes(l.side)) images.set(l.src, l.fileName);
       let i = 0;
       for (const [src, name] of images) form.append(`original_${i++}`, await (await fetch(src)).blob(), name);
 
@@ -242,6 +250,17 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
         number, createdAt: new Date(), garment: garment.name, method, price, contacts, previews, fileNames: [...images.values()],
       });
       form.append('order_pdf', pdf, `order_${number}.pdf`);
+
+      // Данные макета: слои с положением, размером и шрифтами — по ним макет можно собрать заново.
+      // Картинки в JSON не кладём (они уже в заявке файлами), вместо содержимого — имя файла.
+      const design = {
+        version: 1,
+        garment: { id: garment.id, name: garment.name, shapeId: garment.shapeId },
+        method,
+        layers: visibleLayers(layers).filter((l) => sides.includes(l.side)).map((l) =>
+          l.kind === 'image' ? { ...l, src: /^(data|blob):/.test(l.src) ? undefined : l.src, file: l.fileName } : l),
+      };
+      form.append('design_json', new Blob([JSON.stringify(design)], { type: 'application/json' }), 'design.json');
 
       form.append('order', JSON.stringify({
         number,
@@ -437,7 +456,10 @@ export function OrderForm({ garment, variant, price, stage, endpoint, onClose }:
               <div className={f.submit}>
                 <label className={s.check}>
                   <input type="checkbox" required checked={c.consent} onChange={(e) => setC({ ...c, consent: e.target.checked })} />
-                  <span>Согласен на обработку персональных данных</span>
+                  <span>
+                    Согласен на обработку персональных данных
+                    {POLICY_URL && <> в соответствии с <a href={POLICY_URL} target="_blank" rel="noopener noreferrer">политикой конфиденциальности</a></>}
+                  </span>
                 </label>
                 {state === 'error' && <p className={s.err}>Не удалось отправить. Проверьте интернет и попробуйте ещё раз.</p>}
                 <button className={`${s.cta} ${f.send}`} disabled={state === 'sending' || capturing}>

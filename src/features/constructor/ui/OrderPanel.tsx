@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { track } from '../analytics/events';
 import { METHOD_INFO } from '../config/pricing';
+import { STOCK_HINTS } from '../config/stock';
 import { SIZE_CHART } from '../config/size-chart';
 import type { calcPrice } from '../model/pricing';
 import { selectGarment, selectSizes, useConstructor, variantQty } from '../model/store';
@@ -18,6 +19,12 @@ export const colorsWord = (n: number) => {
   const d = n % 10, h = n % 100;
   return `${n} ${d === 1 && h !== 11 ? 'цвет' : d >= 2 && d <= 4 && (h < 12 || h > 14) ? 'цвета' : 'цветов'}`;
 };
+
+/** Мягкая подпись об остатке: нужно больше, чем есть (в том числе при нуле) — остальное под заказ. null — остаток известен и хватает. */
+export function stockHint(stock: number | undefined, want: number): string | null {
+  if (!STOCK_HINTS || stock === undefined || want <= stock) return null;
+  return stock <= 0 ? 'нет в наличии — под заказ' : `в наличии ${stock} — остальное под заказ`;
+}
 
 /** «DTG — прямая печать» → «DTG» и «прямая печать». */
 const splitTitle = (t: string) => {
@@ -98,9 +105,10 @@ export function OrderPanel({ variant, price, onSizeChart }: {
         {variant?.sizes.map((size) => {
           const q = sizes[size] ?? 0;
           const [main, sub] = splitSize(size);
+          const hint = stockHint(variant.stock?.[size], q);
           return (
             <div key={size} className={q ? o.sizeActive : o.size}>
-              <span className={o.sizeName}>{main}{sub && <small>{sub}</small>}</span>
+              <span className={o.sizeName}>{main}{sub && <small>{sub}</small>}{hint && <small className={o.stockHint}>{hint}</small>}</span>
               <div className={o.step}>
                 <button type="button" aria-label={`Меньше ${size}`} onClick={() => incSize(size, -1)} disabled={!q}><Icon name="minus" size={16} /></button>
                 <input
@@ -193,7 +201,7 @@ function CountUp({ value }: { value: number }) {
   return <>{rub(shown)}</>;
 }
 
-export function OrderFooter({ price, hasDesign, onOrder }: { price: Price | null; hasDesign: boolean; onOrder: () => void }) {
+export function OrderFooter({ price, hasDesign, blocked = false, onOrder }: { price: Price | null; hasDesign: boolean; /** Принт выходит за зону печати: кнопка ведёт к проблемному слою. */ blocked?: boolean; onOrder: () => void }) {
   const canOrder = !!price?.qty && hasDesign;
   const one = price?.lines.length === 1 ? price.lines[0] : null;
   return (
@@ -208,7 +216,7 @@ export function OrderFooter({ price, hasDesign, onOrder }: { price: Price | null
       </div>
       {/* aria-disabled — только для читалок: кнопка выглядит главной всегда, а нажатие подсказывает следующий шаг */}
       <button className={o.button} onClick={onOrder} aria-disabled={!canOrder}>
-        {!hasDesign ? 'Добавить принт' : !price?.qty ? 'Выбрать размеры' : 'Оформить заявку'}
+        {!hasDesign ? 'Добавить принт' : blocked ? 'Принт вне зоны' : !price?.qty ? 'Выбрать размеры' : 'Оформить заявку'}
       </button>
     </footer>
   );

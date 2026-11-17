@@ -349,7 +349,8 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = fal
     return () => cancelAnimationFrame(raf);
   }, [focusKey]);
 
-  const sideLayers = layers.filter((l) => l.side === side);
+  // Скрытые слои на холст не попадают: ни в рисунок, ни в выбор, ни в снимки.
+  const sideLayers = layers.filter((l) => l.side === side && !l.hidden);
 
   // Подпись под выделенным принтом: «26 × 5 см · A4».
   const selectedLayer = sideLayers.find((l) => l.id === selectedLayerId);
@@ -639,7 +640,7 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = fal
     const g = printRef.current;
     if (st.side !== side || !g) return false;
     if (shape && mockup?.url !== shape.images[side]) return false;
-    return st.layers.filter((l) => l.side === side).every((l) => {
+    return st.layers.filter((l) => l.side === side && !l.hidden).every((l) => {
       const n = g.findOne(`#${l.id}`);
       if (l.kind === 'text') return !!n && fontReady(l.fontFamily, l.bold, l.italic, l.text);
       return !!n && !!(n as Konva.Image).image();
@@ -728,7 +729,7 @@ export function DesignStage({ apiRef, empty, zoom: zoomProp, onZoom, focus = fal
         node.scale({ x: node.scaleX() * r.scale, y: node.scaleY() * r.scale });
         node.position({ x: r.x, y: r.y });
         const gid = id.slice(GROUP_ID.length);
-        updateLayers(commitGroup(node, layers.filter((l) => l.group === gid && l.side === side), { w: area.w, h: area.h }));
+        updateLayers(commitGroup(node, layers.filter((l) => l.group === gid && l.side === side && !l.hidden), { w: area.w, h: area.h }));
         return;
       }
       const layer = layers.find((l) => l.id === id);

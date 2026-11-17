@@ -33,6 +33,13 @@ function layerRect(l: DesignLayer, h: number) {
   return { x1: Math.min(...xs), y1: Math.min(...ys), x2: Math.max(...xs), y2: Math.max(...ys) };
 }
 
+/** Габарит слоя в координатах зоны печати (пиксели условной ширины W) и размеры самой зоны — для проверки выхода за её край. */
+export function layerZoneRect(garment: Garment, l: DesignLayer) {
+  const pa = printAreaFor(garment, l.side);
+  const h = (W * pa.height * FRAME.h) / (pa.width * FRAME.w);
+  return { rect: layerRect(l, h), w: W, h };
+}
+
 /** Размер слоя или нескольких слоёв вместе (готовый принт) в сантиметрах — для подписи под рамкой выделения. */
 export function layerSizeCm(garment: Garment, layer: DesignLayer | DesignLayer[]): { wCm: number; hCm: number } | null {
   const list = Array.isArray(layer) ? layer : [layer];
@@ -51,7 +58,7 @@ export function layerSizeCm(garment: Garment, layer: DesignLayer | DesignLayer[]
 /**
  * Габарит принта в сантиметрах по каждой стороне модели — для формата и цены.
  * Считается из слоёв, а не с холста, поэтому верен и для сторон, которые сейчас не показаны,
- * и сразу после смены модели. Часть принта за границей зоны печати не учитывается (её обрежет).
+ * и сразу после смены модели. Часть принта за границей зоны печати не учитывается (её обрежет). Скрытые слои не учитываются.
  */
 export function designBounds(garment: Garment, layers: DesignLayer[]): SideBounds {
   const out: SideBounds = {};
@@ -60,7 +67,7 @@ export function designBounds(garment: Garment, layers: DesignLayer[]): SideBound
     const h = (W * pa.height * FRAME.h) / (pa.width * FRAME.w);
     let [x1, y1, x2, y2] = [Infinity, Infinity, -Infinity, -Infinity];
     for (const l of layers) {
-      if (l.side !== side) continue;
+      if (l.side !== side || l.hidden) continue;
       const r = layerRect(l, h);
       x1 = Math.min(x1, Math.max(0, r.x1));
       y1 = Math.min(y1, Math.max(0, r.y1));

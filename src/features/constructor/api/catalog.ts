@@ -39,6 +39,7 @@ function toVariant(p: ApiProduct): GarmentVariant {
     hex,
     price: p.price,
     sizes: sortSizes(p.sizes.map((s) => s.name)),
+    stock: Object.fromEntries(p.sizes.filter((s) => Number.isFinite(s.qty)).map((s) => [s.name, Math.max(0, Math.floor(s.qty))])),
     description: tidy(p.description),
     mockups: { front: abs(p.editor_front_view), back: abs(p.editor_back_view) },
   };

@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import Script from 'next/script';
+import { CookieNotice } from './CookieNotice';
 import './fonts.css';
 
 /**
@@ -14,7 +14,7 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = { width: 'device-width', initialScale: 1, maximumScale: 1 };
 
-/** Счётчик Метрики — только на стенде прототипа: на сайте он уже подключён. */
+/** Счётчик Метрики и уведомление о cookie — только на стенде прототипа: на сайте они свои. */
 const YM_ID = Number(process.env.NEXT_PUBLIC_YM_COUNTER_ID) || 0;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -22,11 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="ru">
       <body style={{ margin: 0 }}>
         {children}
-        {YM_ID > 0 && (
-          <Script id="ym" strategy="afterInteractive">
-            {`(function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};m[i].l=1*new Date();k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})(window,document,"script","https://mc.yandex.ru/metrika/tag.js","ym");ym(${YM_ID},"init",{clickmap:true,trackLinks:true,accurateTrackBounce:true,ecommerce:"dataLayer"});`}
-          </Script>
-        )}
+        <CookieNotice counterId={YM_ID} policyUrl={process.env.NEXT_PUBLIC_POLICY_URL || undefined} />
       </body>
     </html>
   );

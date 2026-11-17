@@ -40,6 +40,7 @@ export function TextPanel({ layer }: { layer: TextLayer }) {
   const { updateLayer } = useConstructor.getState();
   const [, tick] = useState(0);
   const [fontsOpen, setFontsOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const [group, setGroup] = useState<Group>('text');
   const def = fontDef(layer.fontFamily);
   const areaRef = useRef<HTMLTextAreaElement>(null);
@@ -81,6 +82,19 @@ export function TextPanel({ layer }: { layer: TextLayer }) {
     set({ fontFamily: family, bold: layer.bold && !!fd?.bold, italic: layer.italic && !!fd?.italic });
     setFontsOpen(false);
   };
+
+  // Поиск шрифта по названию без учёта регистра; один запрос на ленту телефона и список десктопа.
+  const q = query.trim().toLowerCase();
+  const shownFonts = q ? FONTS.filter((f) => f.family.toLowerCase().includes(q)) : FONTS;
+  const search = (cls: string) => (
+    <label className={`${d.fontSearch} ${cls}`}>
+      <Icon name="search" size={18} />
+      <input
+        type="search" className={d.fontSearchInput} value={query} placeholder="Найти шрифт" aria-label="Найти шрифт"
+        autoComplete="off" enterKeyHint="search" onChange={(e) => setQuery(e.target.value)}
+      />
+    </label>
+  );
 
   const on = (g: Group) => (group === g ? 'true' : 'false');
 
@@ -124,9 +138,11 @@ export function TextPanel({ layer }: { layer: TextLayer }) {
 
       <div className={d.block} data-on={on('font')}>
         <div className={d.sub}>Шрифт</div>
-        {/* Телефон: горизонтальная лента карточек */}
-        <div className={d.fontStrip} ref={stripRef} role="group" aria-label="Шрифт">
-          {FONTS.map((f) => (
+        {/* Телефон: поле поиска и горизонтальная лента карточек */}
+        {search(d.fontSearchMobile)}
+        {!shownFonts.length && <p className={`${d.fontNone} ${d.fontNoneMobile}`}>Ничего не найдено</p>}
+        <div className={d.fontStrip} ref={stripRef} role="group" aria-label="Шрифт" hidden={!shownFonts.length}>
+          {shownFonts.map((f) => (
             <button
               key={f.family} type="button" aria-pressed={f.family === layer.fontFamily}
               className={f.family === layer.fontFamily ? d.fontCardActive : d.fontCard}
@@ -145,12 +161,14 @@ export function TextPanel({ layer }: { layer: TextLayer }) {
           <span className={d.fontName}>{layer.fontFamily}</span>
           <Icon name="chevronDown" size={18} />
         </button>
+        {fontsOpen && search(d.desktopFont)}
         {fontsOpen && (
           <div className={`${d.desktopFont} ${d.fontList}`}>
-            {FONT_GROUPS.map(([grp, title]) => (
+            {!shownFonts.length && <p className={d.fontNone}>Ничего не найдено</p>}
+            {FONT_GROUPS.map(([grp, title]) => shownFonts.some((f) => f.group === grp) && (
               <div key={grp} style={{ display: 'contents' }}>
                 <div className={d.fontGroup}>{title}</div>
-                {FONTS.filter((f) => f.group === grp).map((f) => (
+                {shownFonts.filter((f) => f.group === grp).map((f) => (
                   <button
                     key={f.family} type="button" aria-pressed={f.family === layer.fontFamily}
                     className={f.family === layer.fontFamily ? d.fontOptActive : d.fontOpt}

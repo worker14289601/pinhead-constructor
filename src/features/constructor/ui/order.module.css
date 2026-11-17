@@ -40,6 +40,7 @@
 .size:hover { border-color: var(--line); }
 .sizeActive { border-color: var(--ink); background: var(--lime-soft); }
 .sizeName { display: flex; flex-direction: column; justify-content: center; padding-left: 4px; font-size: var(--fs-sm); font-weight: 700; line-height: 1.15; overflow-wrap: anywhere; }
+.sizeName small.stockHint, .stockHint { margin-top: 2px; font-size: var(--fs-xs); font-weight: 400; color: var(--warn-ink); line-height: 1.2; }
 .sizeName small { font-size: var(--fs-xs); font-weight: 400; color: var(--muted); }
 .step { display: grid; grid-template-columns: 36px minmax(0, 1fr) 36px; align-items: center; gap: 2px; }
 .step button {

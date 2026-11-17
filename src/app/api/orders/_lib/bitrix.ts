@@ -27,6 +27,11 @@ export async function sendToBitrix(o: Order, webhook: string, categoryId?: strin
     return json.result;
   };
 
+  // Источник сделки: код из справочника «Источники» CRM (например, свой источник «Конструктор»).
+  const sourceId = process.env.ORDER_BITRIX_SOURCE_ID?.trim();
+  // Своё поле сделки (UF_CRM_…) — в него пишется «Конструктор», если источник занят под другое.
+  const markField = /^UF_CRM_\w+$/.test(process.env.ORDER_BITRIX_MARK_FIELD ?? '') ? process.env.ORDER_BITRIX_MARK_FIELD : undefined;
+
   const c = o.contacts;
   // Контакт — не обязательное условие: если не создался, сделка всё равно уйдёт с контактами в тексте.
   let contactId: number | undefined;
@@ -39,6 +44,7 @@ export async function sendToBitrix(o: Order, webhook: string, categoryId?: strin
         EMAIL: [{ VALUE: c.email, VALUE_TYPE: 'WORK' }],
         ADDRESS_CITY: c.city,
         ADDRESS: c.address,
+        ...(sourceId ? { SOURCE_ID: sourceId } : {}),
       },
     });
   } catch (e) {
@@ -54,7 +60,10 @@ export async function sendToBitrix(o: Order, webhook: string, categoryId?: strin
       OPPORTUNITY: o.total,
       CURRENCY_ID: 'RUB',
       COMMENTS: escapeHtml(orderText(o)).replace(/\n/g, '<br>'),
-      SOURCE_DESCRIPTION: o.page || 'Конструктор',
+      // Метка источника: по ней заявки конструктора отбираются фильтром и в отчётах CRM.
+      ...(sourceId ? { SOURCE_ID: sourceId } : {}),
+      SOURCE_DESCRIPTION: `Конструктор${o.page ? ` · ${o.page}` : ''}`,
+      ...(markField ? { [markField]: 'Конструктор' } : {}),
       UTM_SOURCE: o.utm.source,
       UTM_MEDIUM: o.utm.medium,
       UTM_CAMPAIGN: o.utm.campaign,

@@ -4,6 +4,8 @@ const staticExport = process.env.STATIC_EXPORT === '1';
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
 
 const nextConfig = {
+  // Автотесты собирают в свою папку, чтобы не мешать запущенному dev-серверу.
+  ...(process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : {}),
   // Как в pnhd-studio: standalone-сборка под Docker.
   output: staticExport ? 'export' : 'standalone',
   ...(staticExport ? { basePath, trailingSlash: true } : {}),

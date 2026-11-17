@@ -12,7 +12,9 @@ import { clearDraft, hasContent, loadDraft, saveDraft, type Draft } from '../mod
 import { ensureFont, onFontLoaded } from '../model/fonts';
 import { calcPrice, priceVariants } from '../model/pricing';
 import { METHOD_INFO } from '../config/pricing';
-import { validateFile, ACCEPTED_TYPES, MIN_DPI } from '../model/quality';
+import { validateFile, ACCEPT_ATTR, convertHeic, isHeic, MIN_DPI } from '../model/quality';
+import { overflowingLayers } from '../model/overflow';
+import { sideHasLayers, visibleLayers } from '../model/visibility';
 import { canRedo, canUndo, selectGarment, selectVariant, useConstructor, variantQty } from '../model/store';
 import { PHOTO_SHAPE } from '../config/photo-shapes';
 import { maskOverlay } from '../canvas/masked';
@@ -292,7 +294,16 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
   };
   const pickFile = () => { replaceId.current = null; fileRef.current?.click(); };
 
+  /** Выбранный файл: фото с iPhone (HEIC) сначала перерисовываем в JPEG, дальше всё как обычно. */
   const onFile = (f?: File) => {
+    if (!f || !isHeic(f)) return loadFile(f);
+    const err = validateFile(f);
+    setFileError(err);
+    if (err) { replaceId.current = null; return; }
+    convertHeic(f).then(loadFile, (e: Error) => { replaceId.current = null; setFileError(e.message); });
+  };
+
+  const loadFile = (f?: File) => {
     const slotId = replaceId.current;
     replaceId.current = null;
     if (!f || !garment) return;
@@ -358,7 +369,9 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
   const sideLayerCount = st.layers.filter((l) => l.side === st.side).length;
   const methodName = METHOD_INFO[st.method].title.split(/\s+[—–-]\s+/)[0];
 
-  const hasDesign = st.layers.some((l) => sides.includes(l.side));
+  // Скрытые слои дизайном не считаются: сторона только с ними — пустая.
+  const shown = useMemo(() => visibleLayers(st.layers), [st.layers]);
+  const hasDesign = shown.some((l) => sides.includes(l.side));
 
   // Шаги сверху: первый пройден, когда посетитель сам выбрал вещь или цвет (или уже нанёс принт).
   const firstPick = useRef<string | null>(null);
@@ -369,6 +382,9 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
     if (firstPick.current === null) firstPick.current = key;
     else if (firstPick.current !== key) setPicked(true);
   }, [st.garmentId, st.variantId]);
+  // fontTick: габарит текста зависит от загруженного шрифта.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const blocked = useMemo(() => overflowingLayers({ garments: st.garments, garmentId: st.garmentId, layers: st.layers }).length > 0, [st.garments, st.garmentId, st.layers, st.fontTick]);
   const guideActive: GuideStep = hasDesign ? 3 : picked ? 2 : 1;
   // Баннер сворачивается один раз: если потом отменить единственное действие, страница не прыгает обратно.
   // С небольшой паузой: сразу после выбора цвета или вещи холст перекрашивает изделие и на миг подвисает —
@@ -400,11 +416,19 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
   const openOrder = () => {
     if (!hasDesign) return setTab('design');
     // В готовом принте осталось пустое место под фото — в печать оно уйти не должно.
-    const empty = st.layers.find((l) => l.kind === 'image' && l.placeholder && sides.includes(l.side));
+    const empty = shown.find((l) => l.kind === 'image' && l.placeholder && sides.includes(l.side));
     if (empty) {
       st.setSide(empty.side);
       st.selectLayer(empty.id);
       setHint('Вставьте своё фото в рамку или удалите её.');
+      return;
+    }
+    // Принт выходит за зону печати — за границей он не напечатается: ведём к первому такому слою.
+    const out = overflowingLayers({ garments: st.garments, garmentId: st.garmentId, layers: st.layers });
+    if (out.length) {
+      st.setSide(out[0].side);
+      st.selectLayer(out[0].id);
+      setHint('Часть принта за границей зоны печати. Сдвиньте или уменьшите — или нажмите «Вписать в зону».');
       return;
     }
     if (!price?.qty) { setTab('order'); return finishTo('order'); }
@@ -441,7 +465,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
               onClick={() => { st.setSide(side); track('side_switch', { side }); }}
             >
               {SIDE_TAB[side]}
-              {st.layers.some((l) => l.side === side) && <i className={s.dot} />}
+              {sideHasLayers(st.layers, side) && <i className={s.dot} />}
             </button>
           ))}
         </div>
@@ -546,7 +570,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
           {/* Телефон: слои — не отдельная вкладка, а короткий список под кнопками добавления */}
           {narrow && !selected && !st.selectedGroup && <LayersPanel embedded hex={hex} open onToggle={() => {}} />}
           <input
-            ref={fileRef} type="file" hidden accept={ACCEPTED_TYPES.join(',')}
+            ref={fileRef} type="file" hidden accept={ACCEPT_ATTR}
             onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = ''; }}
           />
         </section>
@@ -573,7 +597,7 @@ export function ConstructorApp({ ordersEndpoint = '/api/orders' }: { ordersEndpo
         </section>
 
         {/* Итог — на мобильном закреплён внизу */}
-        <OrderFooter price={price} hasDesign={hasDesign} onOrder={openOrder} />
+        <OrderFooter price={price} hasDesign={hasDesign} blocked={blocked} onOrder={openOrder} />
       </aside>
 
       {draftGate === 'ask' && draft && (

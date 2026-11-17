@@ -73,6 +73,10 @@ interface ConstructorState {
   /** Заменить слои группы новыми на месте первого из них (новое слово «снимка в каждой букве»); набор склеивается. */
   replaceInGroup: (group: string, removeIds: string[], add: Array<Omit<ImageLayer, 'id' | 'side'>>) => void;
   removeLayer: (id: string) => void;
+  /** Скрыть слой или показать снова; шаг истории. Скрытый слой с выбора снимается. */
+  toggleHidden: (id: string) => void;
+  /** Удалить все слои всех сторон одним шагом истории; изделие, цвет и размеры остаются. */
+  clearAll: () => void;
   duplicateLayer: (id: string) => void;
   /** Поднять (+1) или опустить (−1) слой среди слоёв его стороны. */
   moveLayer: (id: string, dir: 1 | -1) => void;
@@ -264,12 +268,29 @@ export const useConstructor = create<ConstructorState>((set, get) => {
         const layers = s.layers.filter((l) => l.id !== id);
         return { ...record(s), layers, selectedLayerId: null, selectedGroup: null };
       }),
+    toggleHidden: (id) =>
+      set((s) => {
+        const l = s.layers.find((x) => x.id === id);
+        if (!l) return {};
+        const hidden = !l.hidden;
+        return {
+          ...record(s),
+          layers: s.layers.map((x) => (x.id === id ? ({ ...x, hidden: hidden || undefined } as DesignLayer) : x)),
+          selectedLayerId: hidden && s.selectedLayerId === id ? null : s.selectedLayerId,
+          // Выбран готовый принт, из которого скрыли слой: в нём должно остаться хотя бы два видимых слоя.
+          selectedGroup: hidden && l.group && s.selectedGroup === l.group && s.layers.filter((x) => x.group === l.group && !x.hidden && x.id !== id).length < 2
+            ? null : s.selectedGroup,
+        };
+      }),
+    clearAll: () =>
+      set((s) => (s.layers.length ? { ...record(s), layers: [], selectedLayerId: null, selectedGroup: null } : {})),
     duplicateLayer: (id) =>
       set((s) => {
         const i = s.layers.findIndex((l) => l.id === id);
         if (i < 0) return {};
         const src = s.layers[i];
-        const copy = { ...src, id: uid(), x: src.x + 0.04, y: src.y + 0.04 } as DesignLayer;
+        // Копия скрытого слоя — видимая: дублируют, чтобы её увидеть.
+        const copy = { ...src, id: uid(), hidden: undefined, x: src.x + 0.04, y: src.y + 0.04 } as DesignLayer;
         const layers = [...s.layers.slice(0, i + 1), copy, ...s.layers.slice(i + 1)];
         return { ...record(s), layers, selectedLayerId: copy.id };
       }),
@@ -298,7 +319,9 @@ export const useConstructor = create<ConstructorState>((set, get) => {
         const at = rest.indexOf(s.layers[k]) + (dir > 0 ? 1 : 0);
         return { ...record(s), layers: [...rest.slice(0, at), moved, ...rest.slice(at)] };
       }),
-    selectLayer: (selectedLayerId) => set({ selectedLayerId, selectedGroup: null }),
+    // Скрытый слой выбрать нельзя: его нет на холсте.
+    selectLayer: (selectedLayerId) =>
+      set((s) => (selectedLayerId && s.layers.find((l) => l.id === selectedLayerId)?.hidden ? {} : { selectedLayerId, selectedGroup: null })),
     undo: () => travel('past'),
     redo: () => travel('future'),
 
@@ -343,5 +366,8 @@ export const selectSizes = (s: ConstructorState) => (s.variantId && s.quantities
 /** Сколько штук набрано у цвета — только по размерам, которые у него есть. */
 export const variantQty = (q: Record<string, SizeQuantities>, v: { productId: string; sizes: string[] }) =>
   v.sizes.reduce((sum, k) => sum + (q[v.productId]?.[k] ?? 0), 0);
+/** Видимые слои, выходящие за зону печати (см. model/overflow): пока они есть, заявку оформить нельзя. */
+export { overflowingLayers } from './overflow';
+export { sideHasLayers, visibleLayers } from './visibility';
 export const canUndo = (s: ConstructorState) => s.past.length > 0;
 export const canRedo = (s: ConstructorState) => s.future.length > 0;

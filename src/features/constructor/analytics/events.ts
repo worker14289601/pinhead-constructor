@@ -31,6 +31,20 @@ const GOAL_NAME: Partial<Record<FunnelEvent, string>> = {
   order_error: 'order_send_error',
 };
 
+/**
+ * Отказ от аналитики: посетитель нажал «Отказаться» в уведомлении о cookie. Ключ общий со страницей,
+ * где стоит уведомление; при отказе события не отправляются.
+ */
+export const ANALYTICS_OFF_KEY = 'pinhead_analytics_off';
+
+export function analyticsAllowed(): boolean {
+  try {
+    return typeof window !== 'undefined' && localStorage.getItem(ANALYTICS_OFF_KEY) !== '1';
+  } catch {
+    return true; // хранилище недоступно — отказ запомнить негде
+  }
+}
+
 declare global {
   interface Window {
     ym?: (id: number, method: string, ...args: unknown[]) => void;
@@ -42,6 +56,7 @@ export function track(event: FunnelEvent, params?: Record<string, unknown>) {
   const id = Number(process.env.NEXT_PUBLIC_YM_COUNTER_ID);
   const goal = GOAL_NAME[event] ?? event;
   try {
+    if (!analyticsAllowed()) return;
     if (typeof window !== 'undefined' && id && window.ym) {
       window.ym(id, 'reachGoal', goal, params);
     } else if (process.env.NODE_ENV !== 'production') {
@@ -58,7 +73,7 @@ export function trackPurchase(order: {
   /** Цвета заявки: у каждого своя цена за штуку. */
   items: Array<{ productId: string; color: string; perItem: number; qty: number }>;
 }) {
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined' || !analyticsAllowed()) return;
   window.dataLayer = window.dataLayer ?? [];
   window.dataLayer.push({
     ecommerce: {

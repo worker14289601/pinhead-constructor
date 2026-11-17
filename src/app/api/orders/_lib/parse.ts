@@ -1,12 +1,16 @@
+import { createHash } from 'node:crypto';
 import { fetchCatalog } from '@/features/constructor/api/catalog';
 import type { SideBounds } from '@/features/constructor/model/pricing';
 import type { Garment, PrintMethod, Side } from '@/features/constructor/model/types';
 import { newOrderNumber, ORDER_NUMBER } from './number';
 import { priceOrder, type RequestedLine } from './price';
+import { findOrder } from './store';
 
 /** Проверенная заявка: всё, что пришло от клиента, обрезано и приведено к типам. */
 export interface Order {
   number: string;
+  /** Отпечаток содержимого заявки (sha256 поля order) — по нему узнаётся повторная отправка. */
+  fingerprint: string;
   garment: { name: string };
   method: string;
   /** Цвета заявки: у каждого свои размеры и цена за штуку. */
@@ -45,6 +49,13 @@ export class BadOrder extends Error {
   }
 }
 
+/** Та же заявка уже принята: второй раз в канал не отправляем, клиенту отвечаем тем же номером. */
+export class DuplicateOrder extends Error {
+  constructor(public number: string) {
+    super('duplicate');
+  }
+}
+
 const SIDE_NAME: Record<string, string> = {
   front: 'перед', back: 'спина', sleeve_left: 'левый рукав', sleeve_right: 'правый рукав',
 };
@@ -68,6 +79,7 @@ const FILE_RULES: Array<{ key: RegExp; types: string[]; maxMb: number; title: (m
   { key: /^print_(front|back|sleeve_left|sleeve_right)$/, types: PNG, maxMb: 40, title: (m) => `Файл печати: ${SIDE_NAME[m[1]]}` },
   { key: /^original_(\d|1\d)$/, types: IMAGES, maxMb: 15, title: () => 'Файл клиента' },
   { key: /^order_pdf$/, types: ['application/pdf'], maxMb: 20, title: () => 'PDF заказа' },
+  { key: /^design_json$/, types: ['application/json'], maxMb: 5, title: () => 'Данные макета (JSON): слои, положение, шрифты' },
 ];
 
 const rub = (n: number) => `${n.toLocaleString('ru-RU')} ₽`;
@@ -88,6 +100,7 @@ const FILE_KINDS: Record<string, { ext: string; looksRight: (head: Uint8Array) =
   'image/jpeg': { ext: 'jpg', looksRight: (b) => startsWith(b, [0xff, 0xd8, 0xff]) },
   'image/webp': { ext: 'webp', looksRight: (b) => startsWith(b, [0x52, 0x49, 0x46, 0x46]) && startsWith(b, [0x57, 0x45, 0x42, 0x50], 8) },
   'image/svg+xml': { ext: 'svg', looksRight: (b) => new TextDecoder().decode(b).toLowerCase().includes('<svg') },
+  'application/json': { ext: 'json', looksRight: (b) => b[0] === 0x7b },
   'application/pdf': { ext: 'pdf', looksRight: (b) => startsWith(b, [0x25, 0x50, 0x44, 0x46, 0x2d]) },
 };
 /** Сколько байт начала файла читаем для проверки (у SVG перед <svg бывают заголовок и комментарии). */
@@ -115,15 +128,25 @@ export async function parseOrder(req: Request): Promise<Order> {
   if (!req.headers.get('content-type')?.includes('multipart/form-data')) throw new BadOrder('bad_content_type', 415);
   let form: FormData;
   let raw: Record<string, unknown>;
+  let fingerprint: string;
   try {
     form = await req.formData();
-    raw = obj(JSON.parse(String(form.get('order') ?? '')));
+    const json = String(form.get('order') ?? '');
+    raw = obj(JSON.parse(json));
+    fingerprint = createHash('sha256').update(json).digest('hex');
   } catch {
     throw new BadOrder('bad_request');
   }
 
   const rawNumber = str(raw.number, 20);
-  const number = ORDER_NUMBER.test(rawNumber) ? rawNumber : newOrderNumber();
+  let number = ORDER_NUMBER.test(rawNumber) ? rawNumber : newOrderNumber();
+  // Номер уже занят: та же заявка пришла повторно (сбой сети, двойное нажатие) — второй раз не принимаем;
+  // другая заявка с чужим или старым номером получает новый.
+  const known = await findOrder(number);
+  if (known) {
+    if (known.fingerprint === fingerprint) throw new DuplicateOrder(number);
+    number = newOrderNumber();
+  }
 
   // Файлы: только ожидаемые поля, по одному на поле, нужного типа и размера.
   const rawOrderLines: unknown[] = Array.isArray(raw.lines) ? raw.lines : [];
@@ -212,6 +235,7 @@ export async function parseOrder(req: Request): Promise<Order> {
 
   return {
     number,
+    fingerprint,
     garment: { name: priced.garmentName },
     method, lines, qty, total, sides, contacts, utm,
     page: /^https?:\/\//.test(str(raw.page, 300)) ? str(raw.page, 300) : '',

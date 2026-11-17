@@ -132,6 +132,7 @@ button.line:disabled { cursor: progress; }
 .textarea { resize: vertical; min-height: 76px; }
 
 .submit { display: flex; flex-direction: column; gap: 12px; margin-top: 2px; }
+.submit a { color: inherit; text-decoration: underline; }
 .send { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .sendSum { font-weight: 700; }
 

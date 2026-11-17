@@ -3,6 +3,7 @@ import type { RefObject } from 'react';
 import type { DesignStageHandle } from '../canvas/DesignStage';
 import { printAreaFor } from '../config/print-areas';
 import { areaAspect, quarterTurn } from '../model/crop';
+import { layerOverflows } from '../model/overflow';
 import { imageDpi, MIN_DPI } from '../model/quality';
 import { selectGarment, useConstructor } from '../model/store';
 import { SIDE_LABEL, SIDE_TAB, type PhotoShape } from '../model/types';
@@ -10,6 +11,21 @@ import { ShapePicker } from './ShapePicker';
 import { GROUP_ID } from '../canvas/group';
 import { isLetterSlot } from '../model/slot';
 import type { DesignLayer } from '../model/types';
+
+/** Предупреждение: принт вышел за зону печати — часть не напечатается. Кнопка возвращает его в зону. */
+function OverflowWarn({ onFit }: { onFit: () => void }) {
+  return (
+    <div className={d.overflowBox} role="alert">
+      <p className={`${d.badge} ${d.badgeWarn}`}>
+        <Icon name="alert" size={18} />
+        <span>Часть принта за границей зоны печати — она не напечатается. Сдвиньте или уменьшите.</span>
+      </p>
+      <button type="button" className={d.slotBtn} onClick={onFit}>
+        <Icon name="fit" size={20} />Вписать в зону
+      </button>
+    </div>
+  );
+}
 
 /** Подпись слоя в списке готового принта. */
 const memberLabel = (l: DesignLayer) =>
@@ -52,9 +68,15 @@ export function DesignPanel({ stage, fileError, onUpload, onAddText, onTemplates
   // Выбран готовый принт целиком (группа из нескольких слоёв этой стороны).
   const groupId = useConstructor((st) => st.selectedGroup);
   const layersAll = useConstructor((st) => st.layers);
-  const members = groupId ? layersAll.filter((l) => l.group === groupId && l.side === side) : [];
+  const members = groupId ? layersAll.filter((l) => l.group === groupId && l.side === side && !l.hidden) : [];
   const group = !selected && members.length > 1 ? groupId : null;
-  const inGroup = selected?.group && layersAll.filter((l) => l.group === selected.group && l.side === side).length > 1 ? selected.group : null;
+  const inGroup = selected?.group && layersAll.filter((l) => l.group === selected.group && l.side === side && !l.hidden).length > 1 ? selected.group : null;
+
+  // fontTick: габарит текста зависит от загруженного шрифта — предупреждение пересчитывается вместе с ним.
+  useConstructor((st) => st.fontTick);
+  const isPlaceholder = (l: DesignLayer) => l.kind === 'image' && !!l.placeholder;
+  const selectedOut = !!(selected && garment && !isPlaceholder(selected) && layerOverflows(garment, selected));
+  const groupOut = !!(group && garment && members.some((l) => !isPlaceholder(l) && layerOverflows(garment, l)));
 
   const dpi = selected?.kind === 'image' && garment
     ? imageDpi(selected, printAreaFor(garment, selected.side).widthCm, selected.isVector)
@@ -146,6 +168,7 @@ export function DesignPanel({ stage, fileError, onUpload, onAddText, onTemplates
               </button>
             ))}
           </div>
+          {groupOut && <OverflowWarn onFit={() => stage.current?.align(`${GROUP_ID}${group}`, 'fit')} />}
           <div className={d.seg} role="group" aria-label="Положение и размер">
             {([
               { icon: 'alignCenterX', label: 'По центру по горизонтали', mode: 'centerX' },
@@ -212,6 +235,7 @@ export function DesignPanel({ stage, fileError, onUpload, onAddText, onTemplates
               </span>
             </p>
           )}
+          {selectedOut && <OverflowWarn onFit={() => stage.current?.align(selected.id, 'fit')} />}
           {selected.kind === 'image' && !selected.placeholder && onCrop && (
             <button type="button" className={d.slotBtn} onClick={() => onCrop(selected.id)}>
               <Icon name="crop" size={20} />{selected.slot !== undefined ? 'Подвинуть фото в рамке' : 'Кадрировать'}
